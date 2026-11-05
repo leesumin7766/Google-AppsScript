@@ -1,0 +1,4 @@
+# clasp push 에는 .gs 와 appsscript.json 만 올립니다 (tests/, README 등은 제외)
+**/**
+!*.gs
+!appsscript.json

@@ -1,16 +1,37 @@
 const CONFIG = {
-  SPREADSHEET_ID: '1LSISjIp3SVuU_bt7GGJrIylnVDn9J-TVhM5Fi4P38Ng', 
+  SPREADSHEET_ID: '1LSISjIp3SVuU_bt7GGJrIylnVDn9J-TVhM5Fi4P38Ng',
   MASTER_SHEET_NAME: '마스터',
   LOG_SHEET_NAME: '처리로그',
   QUEUE_SHEET_NAME: '확인 큐',
-  HEADER_ROW: 1,      
-  DATA_START_ROW: 3,  
+  SIM_SHEET_NAME: '시뮬레이션', // DRY_RUN 일 때만 씁니다 (사본에서만 자동 생성)
+  HEADER_ROW: 1,
+  DATA_START_ROW: 3,
   LABEL_NAME: 'GS',
   TEST_NUM_REGEX: /[a-zA-Z]+-\d{2}-\d+/,
-  
+
   // 새로 추가: 착수 안내 메일을 찾기 위한 검색어 (최근 3일치만 검색)
   INIT_SEARCH_QUERY: 'subject:"GS 시험 인증 시작 안내" newer_than:3d',
+  GS_THREAD_LIMIT: 20,
 
   GEMINI_MODEL: 'gemini-3.8-flash',
-  MY_EMAIL: 'hojun7766@tta.or.kr' 
+  MY_EMAIL: 'hojun7766@tta.or.kr'
 };
+
+// 0단계: 스크립트 속성으로 덮어쓸 수 있는 설정
+//   SPREADSHEET_ID    : 대상 시트 (테스트 때는 사본 ID)
+//   DRY_RUN           : true 면 마스터·확인 큐·할 일·처리로그에 쓰지 않고 시뮬레이션 탭에만 기록
+//   INIT_SEARCH_QUERY : 착수 메일 검색어 (지난 메일을 다시 돌릴 때 newer_than 을 늘림)
+//   GS_THREAD_LIMIT   : GS 라벨에서 읽을 스레드 수
+function getSetting(name, defaultValue) {
+  const v = PropertiesService.getScriptProperties().getProperty(name);
+  if (v === null || v === undefined || String(v).trim() === '') return defaultValue;
+  return String(v).trim();
+}
+
+function getSpreadsheetId() {
+  return getSetting('SPREADSHEET_ID', CONFIG.SPREADSHEET_ID);
+}
+
+function isDryRun() {
+  return /^(true|1|on|yes)$/i.test(getSetting('DRY_RUN', ''));
+}

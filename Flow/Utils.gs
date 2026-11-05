@@ -1,3 +1,9 @@
+// 2번 패치: 헤더에 괄호가 있을 경우 괄호 앞부분만 잘라내어 공백 제거 후 키로 사용
+// (순수 함수 — tests/ 에서 시트 없이 확인)
+function normalizeHeader(header) {
+  return String(header).split('(')[0].trim();
+}
+
 function getColumnMap(sheet, headerRow) {
   const lastCol = sheet.getLastColumn();
   if (lastCol === 0) return {};
@@ -7,9 +13,7 @@ function getColumnMap(sheet, headerRow) {
   
   headers.forEach((header, index) => {
     if (header) {
-      // 2번 패치: 헤더에 괄호가 있을 경우 괄호 앞부분만 잘라내어 공백 제거 후 키로 사용
-      const cleanHeader = header.split('(')[0].trim();
-      colMap[cleanHeader] = index + 1;
+      colMap[normalizeHeader(header)] = index + 1;
     }
   });
   

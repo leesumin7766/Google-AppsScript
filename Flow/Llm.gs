@@ -61,9 +61,11 @@ function maskSensitiveData(text) {
   return masked;
 }
 
-function getRowDataAsObject(sheet, rowIndex, headers) {
+// writer 를 주면 DRY_RUN 중 '쓴 셈 친' 값까지 반영해서 읽습니다.
+function getRowDataAsObject(sheet, rowIndex, headers, writer) {
   const lastCol = headers.length;
-  const values = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+  const values = writer ? writer.getRowValues(sheet, rowIndex, lastCol)
+                        : sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
   const rowObj = {};
   headers.forEach((header, i) => {
     if (header) rowObj[header.toString().trim()] = values[i] === "" ? null : values[i];

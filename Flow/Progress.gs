@@ -1,5 +1,5 @@
 // GS 라벨 진행 메일 처리 로직 (시험번호 매칭, LLM 일정 추출, 시트 갱신, 옵시디언 동기화)
-function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers, processedIds) {
+function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers, processedIds, writer) {
   const label = GmailApp.getUserLabelByName(CONFIG.LABEL_NAME);
   if (!label) {
     Logger.log(`⚠️ 알림: '${CONFIG.LABEL_NAME}' 라벨이 존재하지 않습니다.`);
@@ -12,7 +12,7 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
     return;
   }
 
-  const threads = label.getThreads(0, 20);
+  const threads = label.getThreads(0, Number(getSetting('GS_THREAD_LIMIT', CONFIG.GS_THREAD_LIMIT)));
   if (threads.length === 0) {
     Logger.log(`ℹ️ [알림]: '${CONFIG.LABEL_NAME}' 라벨이 지정된 메일이 0건입니다.`);
     return;
@@ -37,7 +37,7 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
       // 2. 제목에 시험번호가 없으면 스킵 (LLM 미호출)
       const testNumMatch = subject.match(CONFIG.TEST_NUM_REGEX);
       if (!testNumMatch) {
-        logMessage(logSheet, msgId, date, '기존업무: 제목에 시험번호 없음');
+        writer.log(logSheet, msgId, date, '기존업무: 제목에 시험번호 없음', '');
         continue;
       }
       
@@ -47,6 +47,7 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
       // 3. 시트에 등록된 시험번호가 없으면 스킵 (LLM 미호출)
       if (!rowIndex) {
         Logger.log(`⏳ [대기]: 시트에 '${testNumber}' 행이 아직 기입되지 않아 다음 주기에 다시 확인합니다. (메일 ID: ${msgId})`);
+        writer.note({ msgId: msgId, testNumber: testNumber, reason: '처리로그 없음 → 다음 주기에 다시 확인' }, CONFIG.MASTER_SHEET_NAME, '시트에 시험번호 행 없음');
         continue; // logMessage를 호출하지 않아야 다음 실행 때 다시 읽어옵니다.
       }
 
@@ -61,9 +62,10 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
       targetHeaders.forEach(headerName => {
         const colIndex = colMap[headerName];
         if (colIndex) {
-          const cell = masterSheet.getRange(rowIndex, colIndex);
-          if (!cell.getValue() || cell.getValue().toString().trim() === "") {
-            cell.setValue(parsedInfo[headerName]);
+          const cellValue = writer.getCellValue(masterSheet, rowIndex, colIndex);
+          if (!cellValue || cellValue.toString().trim() === "") {
+            writer.setCell(masterSheet, rowIndex, colIndex, parsedInfo[headerName],
+                           { msgId: msgId, testNumber: testNumber, colName: headerName, reason: 'STEP A: 빈칸 채움' });
           }
         }
       });
@@ -73,15 +75,17 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
       // ----------------------------------------------------
       const isMyEmail = sender.includes(CONFIG.MY_EMAIL);
       const maskedBody = maskSensitiveData(body);
-      const currentRowData = getRowDataAsObject(masterSheet, rowIndex, headers);
+      const currentRowData = getRowDataAsObject(masterSheet, rowIndex, headers, writer);
 
       // 신규 메일 검증 완료 시에만 Gemini 호출
       const llmResult = callGeminiAPI(apiKey, maskedBody, isMyEmail, date, subject, testNumber, currentRowData);
       
       if (!llmResult) {
-        logMessage(logSheet, msgId, date, `LLM 호출 실패 (${testNumber})`);
+        writer.log(logSheet, msgId, date, `LLM 호출 실패 (${testNumber})`, testNumber);
         continue;
       }
+
+      writer.note({ msgId: msgId, testNumber: testNumber, reason: 'LLM 응답 원문 (검토용)' }, 'LLM', JSON.stringify(llmResult));
 
       let sendToQueue = false;
       let queueReason = [];
@@ -104,43 +108,48 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
             sendToQueue = true;
             queueReason.push(`[${colName}] 덮어쓰기 충돌 (기존값: ${currentVal})`);
           } else {
-            updates.push({ colIndex: colMap[colName], value: update.값 });
+            updates.push({ colIndex: colMap[colName], colName: colName, value: update.값, reason: 'LLM: 열갱신' });
           }
         }
       }
 
       // 상태 변경
       if (llmResult.상태변경) {
-        updates.push({ colIndex: colMap['상태'], value: llmResult.상태변경 });
+        updates.push({ colIndex: colMap['상태'], colName: '상태', value: llmResult.상태변경, reason: 'LLM: 상태변경' });
       }
 
       // 최종 반영 분기
       if (sendToQueue) {
         const mailLink = `https://mail.google.com/mail/u/0/#inbox/${threadId}`;
-        queueSheet.appendRow([testNumber, mailLink, queueReason.join(" / "), JSON.stringify(llmResult, null, 2), "대기"]);
-        logMessage(logSheet, msgId, date, `LLM: 확인 큐로 전송 (${testNumber})`);
+        writer.appendRow(queueSheet, [testNumber, mailLink, queueReason.join(" / "), JSON.stringify(llmResult, null, 2), "대기"],
+                         { msgId: msgId, testNumber: testNumber, reason: '확인 큐: ' + queueReason.join(" / ") });
+        writer.log(logSheet, msgId, date, `LLM: 확인 큐로 전송 (${testNumber})`, testNumber);
       } else {
         // 시트 값 업데이트
         for (const u of updates) {
-          masterSheet.getRange(rowIndex, u.colIndex).setValue(u.value);
+          writer.setCell(masterSheet, rowIndex, u.colIndex, u.value,
+                         { msgId: msgId, testNumber: testNumber, colName: u.colName, reason: u.reason });
         }
         
         // 진행상황 추가 기입
         if (llmResult.요약 && colMap['진행상황']) {
-          const progressCell = masterSheet.getRange(rowIndex, colMap['진행상황']);
-          const oldProgress = progressCell.getValue();
+          const oldProgress = writer.getCellValue(masterSheet, rowIndex, colMap['진행상황']);
           const mmdd = Utilities.formatDate(date, "Asia/Seoul", "MM/dd");
           const newLine = `[${mmdd}] ${llmResult.요약}`;
-          progressCell.setValue(oldProgress ? oldProgress + "\n" + newLine : newLine);
+          writer.setCell(masterSheet, rowIndex, colMap['진행상황'], oldProgress ? oldProgress + "\n" + newLine : newLine,
+                         { msgId: msgId, testNumber: testNumber, colName: '진행상황', reason: '요약 덧붙임' });
         }
         
-        logMessage(logSheet, msgId, date, `LLM: 시트 반영 완료 (${testNumber})`);
+        writer.log(logSheet, msgId, date, `LLM: 시트 반영 완료 (${testNumber})`, testNumber);
 
         // ----------------------------------------------------
         // [STEP C] 3단계: 옵시디언(GitHub) Flow.md 업데이트
         // ----------------------------------------------------
-        const updatedRowData = getRowDataAsObject(masterSheet, rowIndex, headers);
-        updateObsidianFlow(testNumber, updatedRowData);
+        // DRY_RUN 에서는 GitHub 에 쓰지 않습니다. (호출 자체는 3단계 B1 에서 제거)
+        if (!writer.dryRun) {
+          const updatedRowData = getRowDataAsObject(masterSheet, rowIndex, headers);
+          updateObsidianFlow(testNumber, updatedRowData);
+        }
       }
     }
   }
