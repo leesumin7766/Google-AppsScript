@@ -379,6 +379,252 @@ test('[마스킹] 여러 전화번호 형식과 IP 를 가림', () => {
 });
 
 // =========================================================================
+// 2단계 (A1~A8)
+// =========================================================================
+// 같은 사본(ss)으로 진행 메일 처리를 한 번 더 돌림 (재시도·재실행 확인용)
+function progressRun(ss, { gsThreads, llmResponse, props, dry }) {
+  const p = Object.assign({ GEMINI_API_KEY: 'k', SPREADSHEET_ID: F.COPY_ID }, props || {});
+  if (dry) p.DRY_RUN = 'true';
+  const flow = loadFlow({ props: p, spreadsheets: { [F.COPY_ID]: ss }, gsThreads, llmResponse });
+  flow.runProgressCheck();
+  return flow;
+}
+const logRows = log => log.data.slice(1).filter(r => r[0]).map(r => ({ id: r[0], 결과: r[2], 상태: r[3], 시도: r[4] }));
+const queueRows = q => q.data.filter(r => r.some(v => v !== ''));
+
+test('[A1] 같은 날짜는 충돌이 아님 (시트의 Date 와 LLM 의 문자열 비교)', () => {
+  const { flow, master, queue, log } = setup({
+    master: F.makeMaster({ rows: [progressRow({ 패치: F.kstDate('2026-11-20') })] }),
+    gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+    llmResponse: llm({ 열갱신: [{ 열: '패치', 값: '2026-11-20' }, { 열: '시험종료일', 값: '2026-12-10' }] }),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(queueRows(queue).length, 0);
+  assert.strictEqual(master.get(3, F.col('시험종료일')), '2026-12-10');
+  assert.strictEqual(logRows(log)[0].상태, '완료');
+});
+
+test('[A1] 충돌한 열만 확인 큐로, 나머지 열과 요약은 반영', () => {
+  const { flow, master, queue, log } = setup({
+    master: F.makeMaster({ rows: [progressRow({ 패치: '2026-11-18' })] }),
+    gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+    llmResponse: llm({ 열갱신: [{ 열: '패치', 값: '2026-11-20' }, { 열: '시험종료일', 값: '2026-12-10' }] }),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(master.get(3, F.col('패치')), '2026-11-18', '충돌 열은 그대로');
+  assert.strictEqual(master.get(3, F.col('시험종료일')), '2026-12-10', '충돌 없는 열은 반영');
+  assert.strictEqual(master.get(3, F.col('진행상황')), '[11/06] 패치 일정 안내');
+  const q = queueRows(queue);
+  assert.strictEqual(q.length, 1);
+  assert.ok(q[0][2].includes('[패치] 덮어쓰기 충돌') && !q[0][2].includes('시험종료일'));
+  assert.strictEqual(logRows(log)[0].상태, '확인대기');
+});
+
+test('[A1] 확신도 낮음이면 아무것도 반영하지 않고 확인 큐', () => {
+  const { flow, master, queue } = setup({
+    master: F.makeMaster({ rows: [progressRow()] }),
+    gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+    llmResponse: llm({ 확신도: '낮음', 불확실한이유: '날짜가 두 개', 열갱신: [{ 열: '패치', 값: '2026-11-20' }] }),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(master.get(3, F.col('패치')), '');
+  assert.strictEqual(master.get(3, F.col('진행상황')), '');
+  assert.ok(queueRows(queue)[0][2].includes('확신도 낮음') && queueRows(queue)[0][2].includes('[패치] 제안: 2026-11-20'));
+});
+
+test('[A2] classifyGeminiResponse: 실패 종류 구분', () => {
+  const flow = loadFlow();
+  const ok = JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"요약":"a"}' }] }, finishReason: 'STOP' }] });
+  const kind = (c, t) => { const r = flow.classifyGeminiResponse(c, t); return r.ok ? 'ok' : r.kind; };
+  assert.strictEqual(kind(200, ok), 'ok');
+  assert.strictEqual(kind(429, '{}'), 'transient');
+  assert.strictEqual(kind(503, '<html>'), 'transient');
+  assert.strictEqual(kind(400, '{"error":{"message":"bad schema"}}'), 'fatal');
+  assert.strictEqual(kind(403, '{"error":{"message":"key"}}'), 'fatal');
+  assert.strictEqual(kind(200, '<html>'), 'parse');
+  assert.strictEqual(kind(200, JSON.stringify({ candidates: [{ content: { parts: [{ text: '{깨짐' }] } }] })), 'parse');
+  assert.strictEqual(kind(200, JSON.stringify({ candidates: [{ finishReason: 'SAFETY' }] })), 'blocked');
+  assert.strictEqual(kind(200, JSON.stringify({ promptFeedback: { blockReason: 'OTHER' } })), 'blocked');
+});
+
+test('[A2] 일시 오류는 같은 처리로그 행에서 3회까지 다시 시도한 뒤 포기', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const log = ss.getSheetByName('처리로그');
+  const run = () => progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: { __status: 503 } });
+  run();
+  assert.deepStrictEqual(logRows(log).map(r => [r.상태, r.시도]), [['재시도대기', 1]]);
+  run();
+  assert.deepStrictEqual(logRows(log).map(r => [r.상태, r.시도]), [['재시도대기', 2]]);
+  run();
+  assert.deepStrictEqual(logRows(log).map(r => [r.상태, r.시도]), [['포기', 3]]);
+  const f = run();
+  assert.strictEqual(f.fetches.length, 0, '포기한 메일은 다시 부르지 않음');
+  assert.deepStrictEqual([log.get(1, 4), log.get(1, 5)], ['상태', '시도횟수'], 'D1·E1 헤더');
+});
+
+test('[A2] 재시도 중 성공하면 같은 행이 완료로 바뀜', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const log = ss.getSheetByName('처리로그');
+  progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: { __raw: '{깨진 JSON' } });
+  assert.strictEqual(logRows(log)[0].상태, '재시도대기');
+  progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  assert.deepStrictEqual(logRows(log).map(r => [r.상태, r.시도]), [['완료', 2]]);
+});
+
+test('[A2] 안전 차단은 바로 포기', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: { __finish: 'SAFETY' } });
+  assert.deepStrictEqual(logRows(ss.getSheetByName('처리로그')).map(r => [r.상태, r.시도]), [['포기', 1]]);
+});
+
+test('[A2] 키·모델 오류(4xx)는 처리로그 없이 실행을 멈춤 (다른 메일도 버리지 않음)', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const f = progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1]), fakeThread('th2', [F.MAIL.progress2])], llmResponse: { __status: 403 } });
+  assert.strictEqual(f.fetches.length, 1);
+  assert.strictEqual(logRows(ss.getSheetByName('처리로그')).length, 0);
+  assert.ok(f.logs.some(l => l.includes('실행을 멈춥니다')));
+});
+
+test('[A2] 상태 열이 빈 예전 처리로그 행은 완료로 봄', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  ss.getSheetByName('처리로그').appendRow(['prog-1', '2026-11-01', 'LLM: 시트 반영 완료']);
+  const f = progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  assert.strictEqual(f.fetches.length, 0);
+});
+
+test('[A2] 처리로그 D1 에 다른 값이 있으면 멈춤 / DRY_RUN 은 헤더를 쓰지 않음', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  ss.getSheetByName('처리로그').set(1, 4, '비고');
+  const f = progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  assert.strictEqual(f.fetches.length, 0);
+  assert.ok(f.logs.some(l => l.includes("D1 에 '상태' 대신 '비고'")));
+  const ss2 = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  progressRun(ss2, { dry: true, gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  assert.strictEqual(ss2.getSheetByName('처리로그').get(1, 4), '');
+});
+
+const noNumber = (over) => Object.assign({}, F.MAIL.progress1, { id: 'prog-x', subject: 'Re: 패치 일정 문의' }, over || {});
+
+test('[A3] 제목에 없으면 같은 스레드의 다른 메일 제목에서 찾음', () => {
+  const { flow, master } = setup({
+    master: F.makeMaster({ rows: [progressRow()] }),
+    gsThreads: [fakeThread('th1', [Object.assign({}, F.MAIL.progress2, { id: 'first' }), noNumber()])],
+    llmResponse: llm({ 열갱신: [{ 열: '패치', 값: '2026-11-20' }] }),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(master.get(3, F.col('패치')), '2026-11-20');
+});
+
+test('[A3] 스레드에도 없으면 발신 도메인을 담당자 메일 도메인과 맞춤', () => {
+  const { flow, master } = setup({
+    master: F.makeMaster({ rows: [progressRow({ 담당자: '홍길동\nhong@ganada.example' }), { 시험번호: 'TTA-26-00002', 상태: '진행', 담당자: 'x@other.example' }] }),
+    gsThreads: [fakeThread('th1', [noNumber({ from: '김부장 <kim@ganada.example>' })])],
+    llmResponse: llm({ 열갱신: [{ 열: '패치', 값: '2026-11-20' }] }),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(master.get(3, F.col('패치')), '2026-11-20');
+});
+
+test('[A3] 내가 보낸 메일은 받는 사람 도메인으로 맞춤', () => {
+  const { flow, master } = setup({
+    master: F.makeMaster({ rows: [progressRow({ 담당자: 'hong@ganada.example' })] }),
+    gsThreads: [fakeThread('th1', [noNumber({ from: '나 <hojun7766@tta.or.kr>', to: '홍길동 <hong@ganada.example>' })])],
+    llmResponse: llm({ 열갱신: [{ 열: '패치', 값: '2026-11-20' }] }),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(master.get(3, F.col('패치')), '2026-11-20');
+});
+
+test('[A3] 후보가 없거나(공용 메일) 여러 개면 확인 큐 + 확인대기, 다음 주기에 다시 처리하지 않음', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [
+    progressRow({ 담당자: 'a@ganada.example' }), { 시험번호: 'TTA-26-00002', 상태: '진행', 담당자: 'b@ganada.example' },
+    { 시험번호: 'TTA-25-00003', 상태: '종료', 담당자: 'c@ganada.example' },
+    { 시험번호: 'TTA-26-00004', 상태: '진행', 담당자: '개인메일 업체 x@gmail.com' }] }));  // 공용 도메인은 맞추지 않음
+  const threads = [
+    fakeThread('th1', [noNumber({ id: 'm-gmail', from: '개인 <someone@gmail.com>' })]),
+    fakeThread('th2', [noNumber({ id: 'm-multi', from: 'd@ganada.example' })]),
+  ];
+  progressRun(ss, { gsThreads: threads, llmResponse: llm() });
+  const q = queueRows(ss.getSheetByName('확인 큐'));
+  assert.strictEqual(q.length, 2);
+  assert.ok(q[0][2].includes('후보 없음'));
+  assert.ok(q[1][2].includes('여러 개') && q[1][2].includes('TTA-26-00001, TTA-26-00002') && !q[1][2].includes('TTA-25-00003'));
+  assert.deepStrictEqual(logRows(ss.getSheetByName('처리로그')).map(r => r.상태), ['확인대기', '확인대기']);
+  const f = progressRun(ss, { gsThreads: threads, llmResponse: llm() });
+  assert.strictEqual(queueRows(ss.getSheetByName('확인 큐')).length, 2, '두 번째 실행에서 다시 올리지 않음');
+  assert.strictEqual(f.fetches.length, 0);
+});
+
+test('[A4] 내가 보낸 메일이면 STEP A(년도·기업명·담당자)를 건너뜀', () => {
+  const { flow, master } = setup({
+    master: F.makeMaster({ rows: [progressRow()] }),
+    gsThreads: [fakeThread('th1', [Object.assign({}, F.MAIL.progress1, { from: '이시험 <HOJUN7766@tta.or.kr>' })])],
+    llmResponse: llm(),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(master.get(3, F.col('담당자')), '');
+  assert.strictEqual(master.get(3, F.col('기업명')), '');
+});
+
+test('[A5] 이름에 정규식 특수문자가 있어도 멈추지 않음', () => {
+  const flow = loadFlow();
+  const r = flow.parseBasicInfo('[GS] TTA-26-00001 가나다', '"(주)홍길동 [영업*]" <h@ganada.example>', '(주)홍길동 [영업*] 팀장\n');
+  assert.strictEqual(r['담당자'].split('\n').pop(), '팀장');
+});
+
+test('[A6] 년도는 시험번호에서 (TTA-25-… → 2025), 없으면 빈칸', () => {
+  const flow = loadFlow();
+  assert.strictEqual(flow.parseBasicInfo('[GS] TTA-25-00010 가나다', 'a <a@b.example>', '').년도, 2025);
+  assert.strictEqual(flow.parseBasicInfo('문의', 'a <a@b.example>', '', 'TTA-24-00001').년도, 2024);
+  assert.strictEqual(flow.parseBasicInfo('문의', 'a <a@b.example>', '').년도, '');
+});
+
+test('[A7] 프롬프트: 메일유형 후보, 허용 열과 그 현재 값만, responseSchema', () => {
+  const { flow } = setup({
+    master: F.makeMaster({ rows: [progressRow({ 담당자: '홍길동\nhong@ganada.example', 시험시작일: F.kstDate('2026-11-10') })] }),
+    gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm(),
+  });
+  flow.runProgressCheck();
+  const payload = JSON.parse(flow.fetches[0].options.payload);
+  const sys = payload.systemInstruction.parts[0].text;
+  assert.ok(sys.includes('착수, 1차결함, 2차결함'));
+  assert.ok(sys.includes('"시험시작일":"2026-11-10"'));
+  assert.ok(!sys.includes('hong@ganada.example') && !sys.includes('담당자'), '허용 열이 아닌 값은 보내지 않음');
+  const schema = payload.generationConfig.responseSchema;
+  assert.strictEqual(schema.type, 'OBJECT');
+  assert.ok(schema.properties['열갱신'].items.properties['열'].enum.includes('패치'));
+  assert.ok(!schema.properties['열갱신'].items.properties['열'].enum.includes('상태'));
+});
+
+test('[A8] 날짜 순서가 어긋난 열만 확인 큐로', () => {
+  const { flow, master, queue } = setup({
+    master: F.makeMaster({ rows: [progressRow({ 시험시작일: F.kstDate('2026-11-10'), 시험종료일: '2026-12-10' })] }),
+    gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+    llmResponse: llm({ 열갱신: [
+      { 열: '1차결함', 값: '2026-11-05' },   // 시작일보다 앞 → 확인 큐
+      { 열: '패치', 값: '2026-12-20' },      // 종료일보다 뒤 → 확인 큐
+      { 열: '2차결함', 값: '2026-11-25' },   // 문제 없음 → 반영
+    ] }),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(master.get(3, F.col('1차결함')), '');
+  assert.strictEqual(master.get(3, F.col('패치')), '');
+  assert.strictEqual(master.get(3, F.col('2차결함')), '2026-11-25');
+  const reason = queueRows(queue)[0][2];
+  assert.ok(reason.includes('[1차결함] 날짜 순서 어긋남') && reason.includes('[패치] 날짜 순서 어긋남'), reason);
+});
+
+test('normalizeYmd: 여러 날짜 표기 → yyyy-MM-dd, 없는 날짜는 null', () => {
+  const flow = loadFlow();
+  assert.strictEqual(flow.normalizeYmd('2026.11.5'), '2026-11-05');
+  assert.strictEqual(flow.normalizeYmd('2026/11/05'), '2026-11-05');
+  assert.strictEqual(flow.normalizeYmd('2026. 11. 5.'), '2026-11-05');
+  assert.strictEqual(flow.normalizeYmd(F.kstDate('2026-11-05')), '2026-11-05');
+  assert.strictEqual(flow.normalizeYmd('2026-02-30'), null);
+  assert.strictEqual(flow.normalizeYmd('11월 5일'), null);
+});
+
+// =========================================================================
 let pass = 0, fail = 0, todoFail = 0, fixed = 0;
 for (const t of tests) {
   let err = null;

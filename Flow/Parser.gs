@@ -1,6 +1,7 @@
 // 1. 기존 진행 건의 기본 정보(년도, 기업명, 담당자) 파싱
-function parseBasicInfo(subject, sender, body) {
-  const year = new Date().getFullYear();
+// testNumber 를 주면 그 번호로, 없으면 제목의 번호로 년도를 정합니다 (A6: TTA-26-00001 → 2026)
+function parseBasicInfo(subject, sender, body, testNumber) {
+  const year = yearFromTestNumber(testNumber || (String(subject || '').match(CONFIG.TEST_NUM_REGEX) || [''])[0]);
   let company = "";
   const companyMatch = subject.match(/[a-zA-Z]+-\d{2}-\d+\s+([^,\[\]]+)/);
   if (companyMatch) company = companyMatch[1].trim(); 
@@ -23,7 +24,8 @@ function parseBasicInfo(subject, sender, body) {
 
   // 직급 추출 (수석연구원, 책임연구원 등 복합 직급 우선 탐색)
   let title = "";
-  const titleRegex = new RegExp(name + "\\s*(수석연구원|책임연구원|전임연구원|선임연구원|팀장|과장|대리|사원|책임|선임|수석|연구원|매니저|이사|대표|부장|차장)", "i");
+  // A5: 이름에 특수문자가 있어도 정규식이 깨지지 않게 이스케이프
+  const titleRegex = new RegExp(escapeRegExp(name) + "\\s*(수석연구원|책임연구원|전임연구원|선임연구원|팀장|과장|대리|사원|책임|선임|수석|연구원|매니저|이사|대표|부장|차장)", "i");
   const titleMatch = body.match(titleRegex);
   if (titleMatch) {
     title = titleMatch[1];
@@ -52,6 +54,12 @@ function parseBasicInfo(subject, sender, body) {
   const managerInfo = managerLines.join("\n");
 
   return { '년도': year, '기업명': company, '담당자': managerInfo };
+}
+
+// A6: 시험번호의 두 자리 년도 → 4자리 (시험번호가 없으면 빈칸)
+function yearFromTestNumber(testNumber) {
+  const m = String(testNumber || '').match(/-(\d{2})-/);
+  return m ? 2000 + Number(m[1]) : '';
 }
 
 // 2. 신규 착수 메일 내용 파싱 (기존 로직 유지)

@@ -15,6 +15,16 @@ const CONFIG = {
   INIT_SEARCH_QUERY: 'subject:"GS 시험 인증 시작 안내" newer_than:3d',
   GS_THREAD_LIMIT: 20,
 
+  // A3: 발신 도메인으로 시험번호를 찾을 때 쓰지 않는 도메인 (여러 업체가 함께 쓰는 도메인)
+  SHARED_MAIL_DOMAINS: ['tta.or.kr', 'gmail.com', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com',
+                        'nate.com', 'outlook.com', 'hotmail.com'],
+
+  // A2: LLM 실패 시 최대 시도 횟수
+  LLM_MAX_ATTEMPTS: 3,
+
+  // A7: LLM 이 고를 메일유형 후보
+  MAIL_TYPES: ['착수', '1차결함', '2차결함', '3차결함', '패치', '시험종료', '일정변경', '문의', '기타'],
+
   GEMINI_MODEL: 'gemini-3.8-flash',
   MY_EMAIL: 'hojun7766@tta.or.kr'
 };

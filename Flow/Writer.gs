@@ -87,13 +87,17 @@ function createWriter(ss) {
   }
 
   // 처리로그. DRY_RUN 이면 처리로그에 쓰지 않고, 남기려던 결과를 시뮬레이션에 적어 둡니다.
-  function log(logSheet, msgId, date, result, testNumber) {
+  // opts: { status (기본 완료), attempts, row (재시도면 그 행을 고침) }
+  function log(logSheet, msgId, date, result, testNumber, opts) {
+    opts = opts || {};
+    const status = opts.status || LOG_STATUS.DONE;
     if (!dryRun) {
-      logMessage(logSheet, msgId, date, result);
+      logMessage(logSheet, msgId, date, result, status, opts.attempts, opts.row);
       return;
     }
-    record({ msgId: msgId, testNumber: testNumber || '' }, logSheet.getName(), '', '', '', result,
-           'DRY_RUN: 처리로그에 기록하지 않음');
+    const attempts = opts.attempts ? ` (시도 ${opts.attempts})` : '';
+    record({ msgId: msgId, testNumber: testNumber || '' }, logSheet.getName(), opts.row || '', '상태', '',
+           `${status}${attempts}: ${result}`, 'DRY_RUN: 처리로그에 기록하지 않음');
   }
 
   // 검토용 메모 (DRY_RUN 일 때만 기록). 실제 실행에는 영향이 없습니다.

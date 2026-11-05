@@ -71,9 +71,10 @@ class FakeSpreadsheet {
 }
 
 // ---- 가짜 메일 -------------------------------------------------------------
-function fakeMessage({ id, subject, from, date, body }) {
+function fakeMessage({ id, subject, from, to, cc, date, body }) {
   return {
     getId: () => id, getSubject: () => subject, getFrom: () => from,
+    getTo: () => to || '', getCc: () => cc || '',
     getDate: () => (date instanceof Date ? date : new Date(date)), getPlainBody: () => body,
   };
 }
@@ -128,7 +129,16 @@ function loadFlow(opts) {
         if (url.includes('generativelanguage.googleapis.com')) {
           const payload = JSON.parse(options.payload);
           const r = typeof opts.llmResponse === 'function' ? opts.llmResponse(payload) : opts.llmResponse;
-          const text = JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(r) }] } }] });
+          // 실패 흉내: { __status: 503 } / { __raw: '깨진 JSON' } / { __finish: 'SAFETY' } / { __throw: '네트워크' }
+          if (r && r.__throw) throw new Error(r.__throw);
+          if (r && r.__status) {
+            const body = r.__body !== undefined ? r.__body : JSON.stringify({ error: { code: r.__status, message: '흉내 오류' } });
+            return { getContentText: () => body, getResponseCode: () => r.__status };
+          }
+          const cand = r && r.__finish
+            ? { finishReason: r.__finish }
+            : { content: { parts: [{ text: r && r.__raw !== undefined ? r.__raw : JSON.stringify(r) }] }, finishReason: 'STOP' };
+          const text = JSON.stringify({ candidates: [cand] });
           return { getContentText: () => text, getResponseCode: () => 200 };
         }
         return { getContentText: () => '{"message":"not found"}', getResponseCode: () => 404 };

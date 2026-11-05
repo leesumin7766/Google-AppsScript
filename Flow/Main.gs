@@ -11,6 +11,7 @@ function runInitiationCheck() {
 
   const writer = createWriter(ss);
   if (!writer) return;
+  if (!ensureLogHeaders(logSheet, writer.dryRun)) return;
 
   const headers = getHeaders(masterSheet, CONFIG.HEADER_ROW);
   const processedIds = getProcessedMessageIds(logSheet);
@@ -33,11 +34,12 @@ function runProgressCheck() {
 
   const writer = createWriter(ss);
   if (!writer) return;
+  if (!ensureLogHeaders(logSheet, writer.dryRun)) return;
 
   const colMap = getColumnMap(masterSheet, CONFIG.HEADER_ROW);
   const headers = getHeaders(masterSheet, CONFIG.HEADER_ROW);
-  const processedIds = getProcessedMessageIds(logSheet);
+  const logState = getLogState(logSheet);
 
   Logger.log('🚀 [진행 메일(GS 라벨) 처리] 시작');
-  processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers, processedIds, writer);
+  processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers, logState, writer);
 }
