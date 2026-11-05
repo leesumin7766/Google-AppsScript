@@ -70,3 +70,23 @@ function getRowDataAsObject(sheet, rowIndex, headers) {
   });
   return rowObj;
 }
+
+// 5번 패치: LLM 허용 열 제한 및 상태값 강제 (수식 셀 덮어쓰기 방지)
+const ALLOWED_COLUMNS = ['담당자', '진행상황', '시험시작일', '시험종료일', '상태'];
+const VALID_STATUSES = ['접수', '진행', '중단', '종료']; 
+
+function filterLlmOutput(parsedData) {
+  const filtered = {};
+  for (let key in parsedData) {
+    // 1. 화이트리스트에 없는 열은 무시
+    if (!ALLOWED_COLUMNS.includes(key)) continue;
+    
+    // 2. 상태 열일 경우 정해진 값이 아니면 무시
+    if (key === '상태' && !VALID_STATUSES.includes(parsedData[key])) {
+      continue;
+    }
+    
+    filtered[key] = parsedData[key];
+  }
+  return filtered;
+}

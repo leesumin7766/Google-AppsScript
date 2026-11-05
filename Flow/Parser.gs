@@ -93,3 +93,17 @@ function parseInitiationEmail(sender, body, date) {
     '상태': '접수'
   };
 }
+
+// 4번 패치: 전화번호 마스킹 (PII 보호)
+function maskPhoneNumber(text) {
+  if (!text) return text;
+  // 010.1234.5678, 021234567, 010-1234-5678 등 다양한 형태 마스킹 처리
+  return text.replace(/\b0\d{1,2}[-.\s)]?\d{3,4}[-.\s]?\d{4}\b/g, '***-****-****');
+}
+
+// 1번 패치: 회신 메일의 이전 대화(꼬리표) 원문 절삭
+function cleanEmailBody(body) {
+  if (!body) return "";
+  const quoteRegex = /(\r?\n)?(-----Original Message-----|보낸 사람:|On .* wrote:|>\s).*/s;
+  return body.split(quoteRegex)[0].trim();
+}

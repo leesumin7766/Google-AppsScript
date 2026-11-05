@@ -1,12 +1,19 @@
-function getColumnMap(sheet, headerRowIndex) {
+function getColumnMap(sheet, headerRow) {
   const lastCol = sheet.getLastColumn();
   if (lastCol === 0) return {};
-  const headers = sheet.getRange(headerRowIndex, 1, 1, lastCol).getValues()[0];
-  const map = {};
+  
+  const headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+  const colMap = {};
+  
   headers.forEach((header, index) => {
-    if (header) map[header.toString().trim()] = index + 1;
+    if (header) {
+      // 2번 패치: 헤더에 괄호가 있을 경우 괄호 앞부분만 잘라내어 공백 제거 후 키로 사용
+      const cleanHeader = header.split('(')[0].trim();
+      colMap[cleanHeader] = index + 1;
+    }
   });
-  return map;
+  
+  return colMap;
 }
 
 function getHeaders(sheet, headerRowIndex) {
@@ -37,4 +44,15 @@ function getProcessedMessageIds(logSheet) {
 
 function logMessage(logSheet, msgId, timestamp, result) {
   logSheet.appendRow([msgId, timestamp, result]);
+}
+
+// 6번 패치: 수식이 있는 열 대신 실제 데이터 기준으로 마지막 행을 찾는 함수 추가
+function getLastDataRow(sheet, columnNumber) {
+  const data = sheet.getRange(1, columnNumber, sheet.getMaxRows(), 1).getValues();
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (data[i][0] !== "" && data[i][0] != null) {
+      return i + 1; 
+    }
+  }
+  return 1; 
 }
