@@ -6,7 +6,7 @@ const path = require('path');
 const vm = require('vm');
 
 const FLOW_DIR = path.join(__dirname, '..');
-const GS_FILES = ['Config.gs', 'Utils.gs', 'Parser.gs', 'Llm.gs', 'Writer.gs',
+const GS_FILES = ['Config.gs', 'Utils.gs', 'Parser.gs', 'Llm.gs', 'Writer.gs', 'Tabs.gs',
                   'Initiation.gs', 'Progress.gs', 'Github.gs', 'Main.gs'];
 
 // ---- 가짜 시트 -------------------------------------------------------------
@@ -18,6 +18,8 @@ class FakeSheet {
   }
   markFormula(r, c) { this.formulas.add(`${r},${c}`); }
   getName() { return this.name; }
+  setName(n) { if (this.ss) this.ss._rename(this.name, n); this.name = n; return this; }
+  setFrozenRows(n) { this.frozen = n; }
   _has(v) { return v !== '' && v !== null && v !== undefined; }
   getLastRow() {
     let last = 0;
@@ -47,6 +49,7 @@ class FakeSheet {
       setValue: v => { s.set(r, c, v); return range; },
       getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => s.get(r + i, c + j))),
       setValues: vals => { vals.forEach((row, i) => row.forEach((v, j) => s.set(r + i, c + j, v))); return range; },
+      setDataValidation: rule => { s.validations = (s.validations || []).concat([{ r, c, nr, nc, rule }]); return range; },
     };
     return range;
   }
@@ -61,13 +64,14 @@ class FakeSpreadsheet {
   constructor(id, sheets) {
     this.id = id;
     this.sheets = {};
-    (sheets || []).forEach(s => { this.sheets[s.getName()] = s; });
+    (sheets || []).forEach(s => { this.sheets[s.getName()] = s; s.ss = this; });
     this.inserted = [];
   }
+  _rename(from, to) { const s = this.sheets[from]; delete this.sheets[from]; this.sheets[to] = s; }
   getId() { return this.id; }
   getName() { return `사본(${this.id})`; }
   getSheetByName(n) { return this.sheets[n] || null; }
-  insertSheet(n) { const s = new FakeSheet(n); this.sheets[n] = s; this.inserted.push(n); return s; }
+  insertSheet(n) { const s = new FakeSheet(n); s.ss = this; this.sheets[n] = s; this.inserted.push(n); return s; }
 }
 
 // ---- 가짜 메일 -------------------------------------------------------------
@@ -101,6 +105,7 @@ function loadFlow(opts) {
   const logs = [];
   const fetches = [];
   const searches = [];
+  const triggers = [];
 
   const sandbox = {
     console,
@@ -118,6 +123,16 @@ function loadFlow(opts) {
         if (!ss) throw new Error(`시트 없음: ${id}`);
         return ss;
       },
+      newDataValidation: () => {
+        const rule = {};
+        const b = { requireValueInList: (list) => { rule.list = list; return b; }, setAllowInvalid: () => b, build: () => rule };
+        return b;
+      },
+    },
+    LockService: { getScriptLock: () => ({ tryLock: () => (opts.lockBusy ? false : true), releaseLock: () => {} }) },
+    ScriptApp: {
+      getProjectTriggers: () => triggers,
+      newTrigger: fn => ({ forSpreadsheet: id => ({ onEdit: () => ({ create: () => { triggers.push({ getHandlerFunction: () => fn, id }); } }) }) }),
     },
     GmailApp: {
       search: q => { searches.push(q); return opts.initThreads || []; },
@@ -148,10 +163,10 @@ function loadFlow(opts) {
   vm.createContext(sandbox);
 
   const code = GS_FILES.map(f => `// ---- ${f}\n` + fs.readFileSync(path.join(FLOW_DIR, f), 'utf8')).join('\n') +
-    '\n;globalThis.__consts = { CONFIG, ALLOWED_COLUMNS, VALID_STATUSES, SIM_HEADERS };';
+    '\n;globalThis.__consts = { CONFIG, ALLOWED_COLUMNS, VALID_STATUSES, SIM_HEADERS, QUEUE_HEADERS, TODO_HEADERS };';
   vm.runInContext(code, sandbox, { filename: 'flow-bundle.gs' });
 
-  return Object.assign(sandbox, sandbox.__consts, { logs, fetches, searches, props });
+  return Object.assign(sandbox, sandbox.__consts, { logs, fetches, searches, props, triggers });
 }
 
 // LLM 에 실제로 보낸 본문 (가장 최근 호출)

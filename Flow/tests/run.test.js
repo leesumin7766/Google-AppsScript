@@ -4,7 +4,7 @@
 // TODO  : 다음 단계에서 고칠 문제가 지금 재현됨 (예상된 실패)
 // FIXED : TODO 였는데 통과함 → todo 표시를 지우세요
 const assert = require('assert');
-const { fakeThread, loadFlow, lastLlmBody } = require('./harness');
+const { FakeSheet, fakeThread, loadFlow, lastLlmBody } = require('./harness');
 const F = require('./fixtures');
 
 const tests = [];
@@ -157,7 +157,7 @@ test('DRY_RUN 은 같은 실행 안에서 앞 메일이 "쓴 셈 친" 값을 다
     return s;
   };
   const real = run(false);
-  assert.strictEqual(real.queue.getLastRow(), 1, '실제 실행: 둘째 메일은 패치 충돌로 확인 큐');
+  assert.strictEqual(real.queue.getLastRow(), 2, '실제 실행: 둘째 메일은 패치 충돌로 확인 큐 (머리글 + 1행)');
   const dry = run(true);
   const recs = simObjs(dry.ss);
   assert.strictEqual(recs.filter(r => r.열 === '기업명').length, 1, 'STEP A 는 한 번만');
@@ -390,7 +390,10 @@ function progressRun(ss, { gsThreads, llmResponse, props, dry }) {
   return flow;
 }
 const logRows = log => log.data.slice(1).filter(r => r[0]).map(r => ({ id: r[0], 결과: r[2], 상태: r[3], 시도: r[4] }));
-const queueRows = q => q.data.filter(r => r.some(v => v !== ''));
+// 확인 큐 계약 (B2) — 머리글을 바꾸면 이 테스트도 바뀌어야 합니다
+const QUEUE_COLS = ['ID', '생성시각', '시험번호', '메시지ID', '메일 링크', '열', '기존값', '제안값', '사유', 'LLM 원문', '처리', '처리시각'];
+const queueRows = q => q.data.slice(1).filter(r => r.some(v => v !== ''))
+  .map(r => Object.fromEntries(QUEUE_COLS.map((h, i) => [h, r[i] === undefined ? '' : r[i]])));
 
 test('[A1] 같은 날짜는 충돌이 아님 (시트의 Date 와 LLM 의 문자열 비교)', () => {
   const { flow, master, queue, log } = setup({
@@ -416,7 +419,10 @@ test('[A1] 충돌한 열만 확인 큐로, 나머지 열과 요약은 반영', (
   assert.strictEqual(master.get(3, F.col('진행상황')), '[11/06] 패치 일정 안내');
   const q = queueRows(queue);
   assert.strictEqual(q.length, 1);
-  assert.ok(q[0][2].includes('[패치] 덮어쓰기 충돌') && !q[0][2].includes('시험종료일'));
+  assert.strictEqual(q[0].열, '패치');
+  assert.strictEqual(q[0].기존값, '2026-11-18');
+  assert.strictEqual(q[0].제안값, '2026-11-20');
+  assert.ok(q[0].사유.includes('덮어쓰기 충돌'));
   assert.strictEqual(logRows(log)[0].상태, '확인대기');
 });
 
@@ -429,7 +435,9 @@ test('[A1] 확신도 낮음이면 아무것도 반영하지 않고 확인 큐', 
   flow.runProgressCheck();
   assert.strictEqual(master.get(3, F.col('패치')), '');
   assert.strictEqual(master.get(3, F.col('진행상황')), '');
-  assert.ok(queueRows(queue)[0][2].includes('확신도 낮음') && queueRows(queue)[0][2].includes('[패치] 제안: 2026-11-20'));
+  const q = queueRows(queue);
+  assert.deepStrictEqual(q.map(r => [r.열, r.제안값]), [['패치', '2026-11-20']]);
+  assert.ok(q[0].사유.includes('확신도 낮음: 날짜가 두 개'));
 });
 
 test('[A2] classifyGeminiResponse: 실패 종류 구분', () => {
@@ -547,8 +555,8 @@ test('[A3] 후보가 없거나(공용 메일) 여러 개면 확인 큐 + 확인�
   progressRun(ss, { gsThreads: threads, llmResponse: llm() });
   const q = queueRows(ss.getSheetByName('확인 큐'));
   assert.strictEqual(q.length, 2);
-  assert.ok(q[0][2].includes('후보 없음'));
-  assert.ok(q[1][2].includes('여러 개') && q[1][2].includes('TTA-26-00001, TTA-26-00002') && !q[1][2].includes('TTA-25-00003'));
+  assert.ok(q[0].열 === '시험번호' && q[0].사유.includes('후보 없음') && q[0].시험번호 === '');
+  assert.ok(q[1].사유.includes('여러 개') && q[1].제안값 === 'TTA-26-00001, TTA-26-00002');
   assert.deepStrictEqual(logRows(ss.getSheetByName('처리로그')).map(r => r.상태), ['확인대기', '확인대기']);
   const f = progressRun(ss, { gsThreads: threads, llmResponse: llm() });
   assert.strictEqual(queueRows(ss.getSheetByName('확인 큐')).length, 2, '두 번째 실행에서 다시 올리지 않음');
@@ -610,8 +618,9 @@ test('[A8] 날짜 순서가 어긋난 열만 확인 큐로', () => {
   assert.strictEqual(master.get(3, F.col('1차결함')), '');
   assert.strictEqual(master.get(3, F.col('패치')), '');
   assert.strictEqual(master.get(3, F.col('2차결함')), '2026-11-25');
-  const reason = queueRows(queue)[0][2];
-  assert.ok(reason.includes('[1차결함] 날짜 순서 어긋남') && reason.includes('[패치] 날짜 순서 어긋남'), reason);
+  const q = queueRows(queue);
+  assert.deepStrictEqual(q.map(r => r.열), ['1차결함', '패치']);
+  assert.ok(q.every(r => r.사유.includes('날짜 순서 어긋남')));
 });
 
 test('normalizeYmd: 여러 날짜 표기 → yyyy-MM-dd, 없는 날짜는 null', () => {
@@ -622,6 +631,189 @@ test('normalizeYmd: 여러 날짜 표기 → yyyy-MM-dd, 없는 날짜는 null',
   assert.strictEqual(flow.normalizeYmd(F.kstDate('2026-11-05')), '2026-11-05');
   assert.strictEqual(flow.normalizeYmd('2026-02-30'), null);
   assert.strictEqual(flow.normalizeYmd('11월 5일'), null);
+});
+
+// =========================================================================
+// 3단계 (B1~B4)
+// =========================================================================
+const TODO_COLS = ['ID', '시험번호', '내용', '기한', '출처 메시지ID', '생성시각', '상태'];
+const todoRows = t => (t ? t.data.slice(1).filter(r => r.some(v => v !== ''))
+  .map(r => Object.fromEntries(TODO_COLS.map((h, i) => [h, r[i] === undefined ? '' : r[i]]))) : []);
+const todos = [{ 내용: '패치본 수령 후 재시험', 기한: '2026.11.21' }, { 내용: '결함리포트 회신 확인', 기한: null }];
+
+test('[B1] LLM 할일 → 할 일 탭 (없으면 만들고 머리글·상태 드롭다운), GitHub 는 부르지 않음', () => {
+  const { flow, ss } = setup({
+    props: { GITHUB_TOKEN: 'x' },
+    master: F.makeMaster({ rows: [progressRow()] }),
+    gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+    llmResponse: llm({ 할일: todos }),
+  });
+  flow.runProgressCheck();
+  const t = ss.getSheetByName('할 일');
+  assert.deepStrictEqual(t.data[0], TODO_COLS);
+  assert.deepStrictEqual([...t.validations[0].rule.list], ['신규', '반영', '무시']);
+  assert.deepStrictEqual(todoRows(t).map(r => [r.ID, r.시험번호, r.내용, r.기한, r['출처 메시지ID'], r.상태]), [
+    ['T-prog-1-1', 'TTA-26-00001', '패치본 수령 후 재시험', '2026-11-21', 'prog-1', '신규'],
+    ['T-prog-1-2', 'TTA-26-00001', '결함리포트 회신 확인', '', 'prog-1', '신규'],
+  ]);
+  assert.ok(!flow.fetches.some(f => f.url.includes('api.github.com')));
+});
+
+test('[B1] 같은 시험번호·내용·기한의 할 일은 다시 넣지 않음 (다음 실행·다른 메일이어도)', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm({ 할일: todos }) });
+  progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1, F.MAIL.progress2])],
+                    llmResponse: llm({ 할일: [{ 내용: '패치본 수령 후 재시험', 기한: '2026-11-21' }, { 내용: '새 할 일', 기한: '2026-11-30' }] }) });
+  assert.deepStrictEqual(todoRows(ss.getSheetByName('할 일')).map(r => r.내용), ['패치본 수령 후 재시험', '결함리포트 회신 확인', '새 할 일']);
+});
+
+test('[B1] 확신도 낮음이면 할 일도 넣지 않음 / DRY_RUN 은 할 일 탭을 만들지 않고 기록만', () => {
+  const low = setup({ master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+                      llmResponse: llm({ 확신도: '낮음', 할일: todos }) });
+  low.flow.runProgressCheck();
+  assert.strictEqual(todoRows(low.ss.getSheetByName('할 일')).length, 0);
+  const dry = setup({ dry: true, master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+                      llmResponse: llm({ 할일: todos }) });
+  dry.flow.runProgressCheck();
+  assert.strictEqual(dry.ss.getSheetByName('할 일'), null);
+  assert.strictEqual(simObjs(dry.ss).filter(r => r.탭 === '할 일').length, 2);
+});
+
+test('[B2] 확인 큐: 머리글·처리 드롭다운, 변경 1건당 1행, 보관함도 열리는 #all 링크', () => {
+  const { flow, queue } = setup({
+    master: F.makeMaster({ rows: [progressRow({ 패치: '2026-11-18', 시험종료일: '2026-12-01' })] }),
+    gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+    llmResponse: llm({ 열갱신: [{ 열: '패치', 값: '2026-11-20' }, { 열: '시험종료일', 값: '2026-12-05' }] }),
+  });
+  flow.runProgressCheck();
+  assert.deepStrictEqual(queue.data[0], QUEUE_COLS);
+  assert.deepStrictEqual([...queue.validations[0].rule.list], ['대기', '적용', '무시']);
+  const q = queueRows(queue);
+  assert.deepStrictEqual(q.map(r => [r.ID, r.열, r.처리]), [['Q-prog-1-1', '패치', '대기'], ['Q-prog-1-2', '시험종료일', '대기']]);
+  assert.strictEqual(q[0]['메일 링크'], 'https://mail.google.com/mail/u/0/#all/th1');
+  assert.ok(q[0]['LLM 원문'].includes('"열갱신"'));
+});
+
+test('[B2] 예전 형식 확인 큐는 "확인 큐 (v1)" 로 보관하고 새로 만듦', () => {
+  const old = new FakeSheet('확인 큐', [['TTA-26-00001', 'https://mail…', '[패치] 덮어쓰기 충돌', '{}', '대기']]);
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  ss.sheets['확인 큐'] = old; old.ss = ss;
+  progressRun(ss, { gsThreads: [], llmResponse: llm() });
+  assert.strictEqual(ss.getSheetByName('확인 큐 (v1)').get(1, 3), '[패치] 덮어쓰기 충돌', '예전 행 보존');
+  assert.deepStrictEqual(ss.getSheetByName('확인 큐').data[0], QUEUE_COLS);
+});
+
+test('[B2] 확인 큐 머리글이 일부만 다르면 실행을 멈춤', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  ss.getSheetByName('확인 큐').getRange(1, 1, 1, 12).setValues([QUEUE_COLS.map((h, i) => (i === 5 ? '컬럼' : h))]);
+  const f = progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  assert.strictEqual(f.fetches.length, 0);
+  assert.ok(f.logs.some(l => l.includes("'확인 큐' 탭의 머리글이 다릅니다")));
+});
+
+// 충돌 1건이 든 확인 큐를 만든 사본
+function queueWithConflict() {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow({ 패치: '2026-11-18' })] }));
+  progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm({ 열갱신: [{ 열: '패치', 값: '2026-11-20' }] }) });
+  return ss;
+}
+const qcol = name => QUEUE_COLS.indexOf(name) + 1;
+
+test('[B2] 처리=적용 → 다음 실행 시작 때 마스터에 반영하고 처리시각 기록', () => {
+  const ss = queueWithConflict();
+  const queue = ss.getSheetByName('확인 큐'), master = ss.getSheetByName('마스터');
+  queue.set(2, qcol('처리'), '적용');
+  progressRun(ss, { gsThreads: [], llmResponse: llm() });
+  assert.strictEqual(master.get(3, F.col('패치')), '2026-11-20');
+  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(queue.get(2, qcol('처리시각'))));
+});
+
+test('[B2] 사람이 제안값을 고쳐서 적용해도 검사 후 반영 (2026.11.21 → 2026-11-21)', () => {
+  const ss = queueWithConflict();
+  const queue = ss.getSheetByName('확인 큐');
+  queue.set(2, qcol('제안값'), '2026.11.21');
+  queue.set(2, qcol('처리'), '적용');
+  progressRun(ss, { gsThreads: [], llmResponse: llm() });
+  assert.strictEqual(ss.getSheetByName('마스터').get(3, F.col('패치')), '2026-11-21');
+});
+
+test('[B2] 그사이 마스터 값이 바뀌었으면 적용하지 않고 대기로 되돌림', () => {
+  const ss = queueWithConflict();
+  const queue = ss.getSheetByName('확인 큐'), master = ss.getSheetByName('마스터');
+  master.set(3, F.col('패치'), '2026-11-25');
+  queue.set(2, qcol('처리'), '적용');
+  progressRun(ss, { gsThreads: [], llmResponse: llm() });
+  assert.strictEqual(master.get(3, F.col('패치')), '2026-11-25');
+  assert.strictEqual(queue.get(2, qcol('처리')), '대기');
+  assert.strictEqual(queue.get(2, qcol('처리시각')), '');
+  assert.ok(queue.get(2, qcol('사유')).includes('적용 안 함') && queue.get(2, qcol('사유')).includes('마스터 값이 바뀜'));
+});
+
+test('[B2] 처리=무시 → 처리시각만 기록 / 시험번호 행은 자동 적용하지 않음', () => {
+  const ss = queueWithConflict();
+  const queue = ss.getSheetByName('확인 큐');
+  queue.set(2, qcol('처리'), '무시');
+  queue.appendRow(['Q-x-1', '', '', 'x', '', '시험번호', '', 'TTA-26-00001', '시험번호 없음', '{}', '적용', '']);
+  progressRun(ss, { gsThreads: [], llmResponse: llm() });
+  assert.strictEqual(ss.getSheetByName('마스터').get(3, F.col('패치')), '2026-11-18');
+  assert.notStrictEqual(queue.get(2, qcol('처리시각')), '');
+  assert.strictEqual(queue.get(3, qcol('처리')), '대기');
+  assert.ok(queue.get(3, qcol('사유')).includes('직접 처리하세요'));
+});
+
+test('[B2] onQueueEdit: 확인 큐를 고치면 바로 반영, 다른 탭 편집은 무시 / 트리거 설치는 한 번만', () => {
+  const ss = queueWithConflict();
+  ss.getSheetByName('확인 큐').set(2, qcol('처리'), '적용');
+  const flow = loadFlow({ props: { SPREADSHEET_ID: F.COPY_ID }, spreadsheets: { [F.COPY_ID]: ss } });
+  flow.onQueueEdit({ range: { getSheet: () => ss.getSheetByName('마스터') } });
+  assert.strictEqual(ss.getSheetByName('마스터').get(3, F.col('패치')), '2026-11-18');
+  flow.onQueueEdit({ range: { getSheet: () => ss.getSheetByName('확인 큐') } });
+  assert.strictEqual(ss.getSheetByName('마스터').get(3, F.col('패치')), '2026-11-20');
+  flow.installQueueEditTrigger();
+  flow.installQueueEditTrigger();
+  assert.strictEqual(flow.triggers.length, 1);
+  assert.strictEqual(flow.triggers[0].id, F.COPY_ID);
+});
+
+test('[B2] DRY_RUN 은 확인 큐 결정을 반영하지 않고 기록만', () => {
+  const ss = queueWithConflict();
+  const queue = ss.getSheetByName('확인 큐');
+  queue.set(2, qcol('처리'), '적용');
+  const before = [ss.getSheetByName('마스터').snapshot(), queue.snapshot()];
+  progressRun(ss, { dry: true, gsThreads: [], llmResponse: llm() });
+  assert.deepStrictEqual([ss.getSheetByName('마스터').snapshot(), queue.snapshot()], before);
+  assert.ok(simObjs(ss).some(r => r.탭 === '마스터' && r.열 === '패치' && r.새값 === '2026-11-20' && r.사유.includes('확인 큐 적용')));
+});
+
+test('[B3] 다른 실행이 잠금을 잡고 있으면 아무것도 하지 않음', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const flow = loadFlow({ props: { GEMINI_API_KEY: 'k', SPREADSHEET_ID: F.COPY_ID }, spreadsheets: { [F.COPY_ID]: ss },
+                          gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm(), lockBusy: true });
+  flow.runProgressCheck();
+  flow.runInitiationCheck();
+  assert.strictEqual(flow.fetches.length, 0);
+  assert.strictEqual(logRows(ss.getSheetByName('처리로그')).length, 0);
+  assert.ok(flow.logs.some(l => l.includes('다른 실행이 진행 중')));
+});
+
+test('[B3] 시간이 다 되면 남은 메일은 처리로그 없이 다음 실행으로', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const flow = loadFlow({ props: { GEMINI_API_KEY: 'k', SPREADSHEET_ID: F.COPY_ID }, spreadsheets: { [F.COPY_ID]: ss },
+                          gsThreads: [fakeThread('th1', [F.MAIL.progress1])], initThreads: [fakeThread('t1', [F.MAIL.init1])], llmResponse: llm() });
+  flow.CONFIG.TIME_BUDGET_MS = -1;
+  flow.runProgressCheck();
+  flow.runInitiationCheck();
+  assert.strictEqual(flow.fetches.length, 0);
+  assert.strictEqual(logRows(ss.getSheetByName('처리로그')).length, 0);
+  assert.strictEqual(ss.getSheetByName('마스터').get(4, F.col('상담자')), '');
+});
+
+test('[B4] API 키는 URL 이 아니라 x-goog-api-key 헤더로', () => {
+  const { flow } = setup({ master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  flow.runProgressCheck();
+  const f = flow.fetches[0];
+  assert.ok(!f.url.includes('key='), f.url);
+  assert.strictEqual(f.options.headers['x-goog-api-key'], 'test-key');
 });
 
 // =========================================================================

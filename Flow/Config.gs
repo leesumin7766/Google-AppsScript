@@ -3,7 +3,9 @@ const CONFIG = {
   MASTER_SHEET_NAME: '마스터',
   LOG_SHEET_NAME: '처리로그',
   QUEUE_SHEET_NAME: '확인 큐',
+  TODO_SHEET_NAME: '할 일',
   SIM_SHEET_NAME: '시뮬레이션', // DRY_RUN 일 때만 씁니다 (사본에서만 자동 생성)
+  TIME_BUDGET_MS: 5 * 60 * 1000, // B3: 5분이 지나면 남은 메일은 다음 주기에
   HEADER_ROW: 1,
   DATA_START_ROW: 3,
   // 수식 열: 스크립트가 쓰지 않고, 새 행 위치를 정할 때도 보지 않습니다 (헤더 이름, 괄호 앞부분)

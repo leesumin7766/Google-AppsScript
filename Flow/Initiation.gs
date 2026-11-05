@@ -1,5 +1,5 @@
 // 착수 메일 전용 처리 로직 (시험번호 없음, 새 행 생성)
-function processInitiationEmails(masterSheet, logSheet, headers, processedIds, writer) {
+function processInitiationEmails(masterSheet, logSheet, headers, processedIds, writer, deadline) {
   const threads = GmailApp.search(getSetting('INIT_SEARCH_QUERY', CONFIG.INIT_SEARCH_QUERY));
   const keys = headers.map(h => (h ? normalizeHeader(h) : ''));   // C2: 헤더 정규화
   const skipCols = getFormulaColumnIndexes(headers);
@@ -9,6 +9,11 @@ function processInitiationEmails(masterSheet, logSheet, headers, processedIds, w
     for (const msg of messages) {
       const msgId = msg.getId();
       if (processedIds.has(msgId)) continue;
+      // B3: 시간이 다 되면 처리로그 없이 끝냅니다 (다음 실행에서 이어서 처리)
+      if (deadline && deadline.expired()) {
+        Logger.log('⏱️ 실행 시간 5분이 지나 남은 착수 메일은 다음 실행에서 처리합니다.');
+        return;
+      }
 
       const subject = msg.getSubject();
       if (subject.match(/^(Re|Fwd|RE|FW):/i)) continue;

@@ -1,6 +1,6 @@
-// GS 라벨 진행 메일 처리 로직 (시험번호 매칭, LLM 일정 추출, 시트 갱신, 옵시디언 동기화)
+// GS 라벨 진행 메일 처리 로직 (시험번호 매칭, LLM 일정 추출, 시트 갱신, 확인 큐, 할 일)
 // logState: getLogState() 결과. '재시도대기' 인 메일만 다시 처리합니다.
-function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers, logState, writer) {
+function processGSLabelEmails(masterSheet, logSheet, queueSheet, todoSheet, colMap, headers, logState, writer, deadline) {
   const label = GmailApp.getUserLabelByName(CONFIG.LABEL_NAME);
   if (!label) {
     Logger.log(`⚠️ 알림: '${CONFIG.LABEL_NAME}' 라벨이 존재하지 않습니다.`);
@@ -20,12 +20,13 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
   }
 
   let newProcessedCount = 0; // 신규 처리 메일 카운터
+  const todoKeys = readTodoKeys(todoSheet); // B1: 같은 할 일을 다시 넣지 않도록
+  const nowText = () => Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
 
   threadLoop:
   for (const thread of threads) {
     const messages = thread.getMessages();
     const threadId = thread.getId();
-    const mailLink = `https://mail.google.com/mail/u/0/#inbox/${threadId}`;
     const threadSubjects = messages.map(m => m.getSubject());
 
     for (const msg of messages) {
@@ -36,11 +37,23 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
       const prevAttempts = prev ? prev.attempts : 0;
       const logRow = prev ? prev.row : undefined;
 
+      // B3: 시간이 다 되면 처리로그 없이 끝냅니다 (다음 실행에서 이어서 처리)
+      if (deadline && deadline.expired()) {
+        Logger.log('⏱️ 실행 시간 5분이 지나 남은 메일은 다음 실행에서 처리합니다.');
+        break threadLoop;
+      }
+
       const subject = msg.getSubject();
       const sender = msg.getFrom();
       const date = msg.getDate();
       const body = msg.getPlainBody();
       const isMyEmail = extractEmails(sender).includes(CONFIG.MY_EMAIL.toLowerCase());
+
+      // B2: 확인 큐에 변경 1건당 1행
+      const writeQueue = (testNumber, items, llmRaw, fallbackReason) => {
+        buildQueueRows({ now: nowText(), testNumber, msgId, threadId, items, llmRaw, fallbackReason }).forEach(row =>
+          writer.appendRow(queueSheet, row, { msgId: msgId, testNumber: testNumber, reason: `확인 큐: [${row[5]}] ${row[8]}` }));
+      };
 
       // 2. 시험번호 찾기 (A3): 제목 → 같은 스레드 제목 → 메일 도메인
       const resolved = resolveTestNumber({
@@ -56,8 +69,8 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
       if (!resolved.testNumber) {
         const candidates = (resolved.candidates || []).length ? ` (후보: ${resolved.candidates.join(', ')})` : '';
         const reason = `시험번호 없음: ${resolved.reason}${candidates}`;
-        writer.appendRow(queueSheet, ['', mailLink, reason, JSON.stringify({ 제목: subject, 발신: sender, 후보: resolved.candidates || [] }, null, 2), '대기'],
-                         { msgId: msgId, testNumber: '', reason: '확인 큐: ' + reason });
+        writeQueue('', [{ colName: '시험번호', current: '', value: (resolved.candidates || []).join(', '), reason: reason }],
+                   { 제목: subject, 발신: sender, 후보: resolved.candidates || [] });
         writer.log(logSheet, msgId, date, `확인 큐로 전송: ${reason}`, '', { status: LOG_STATUS.QUEUED, row: logRow });
         continue;
       }
@@ -142,15 +155,12 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
                     `[${i.colName}] ${i.value}`);
       });
 
-      const sendQueue = (reasons) => writer.appendRow(queueSheet,
-        [testNumber, mailLink, reasons.join(" / "), JSON.stringify(llmResult, null, 2), "대기"],
-        { msgId: msgId, testNumber: testNumber, reason: '확인 큐: ' + reasons.join(" / ") });
-
       // 확신도가 낮으면 아무것도 반영하지 않고 전부 확인 큐로 보냅니다 (원칙 1)
       if (llmResult.확신도 === "낮음") {
-        const reasons = [`확신도 낮음: ${llmResult.불확실한이유}`].concat(
-          check.updates.map(u => `[${u.colName}] 제안: ${u.value}`), check.queueReasons);
-        sendQueue(reasons);
+        const why = `확신도 낮음: ${llmResult.불확실한이유}`;
+        const items = check.updates.map(u => ({ colName: u.colName, current: currentRowData[u.colName], value: u.value, reason: why }))
+          .concat(check.queued.map(q => Object.assign({}, q, { reason: `${why} / ${q.reason}` })));
+        writeQueue(testNumber, items, llmResult, why);
         writer.log(logSheet, msgId, date, `LLM: 확신도 낮음 → 확인 큐 (${testNumber})`, testNumber,
                    { status: LOG_STATUS.QUEUED, attempts: attempts, row: logRow });
         continue;
@@ -171,23 +181,19 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
                        { msgId: msgId, testNumber: testNumber, colName: '진행상황', reason: '요약 덧붙임' });
       }
 
+      // B1: LLM 이 뽑은 할 일 → `할 일` 탭 (같은 시험번호·내용·기한이면 넣지 않음)
+      buildTodoRows(llmResult.할일, testNumber, msgId, nowText(), todoKeys).forEach(row =>
+        writer.appendRow(todoSheet, row, { msgId: msgId, testNumber: testNumber, reason: '할 일 추가' }));
+
       if (check.queued.length > 0) {
-        sendQueue(check.queueReasons);
+        writeQueue(testNumber, check.queued, llmResult);
         writer.log(logSheet, msgId, date, `LLM: ${check.updates.length}개 열 반영, ${check.queued.length}개 열 확인 큐 (${testNumber})`, testNumber,
                    { status: LOG_STATUS.QUEUED, attempts: attempts, row: logRow });
       } else {
         writer.log(logSheet, msgId, date, `LLM: 시트 반영 완료 (${testNumber})`, testNumber,
                    { status: LOG_STATUS.DONE, attempts: attempts, row: logRow });
       }
-
-      // ----------------------------------------------------
-      // [STEP C] 옵시디언(GitHub) Flow.md 업데이트
-      // ----------------------------------------------------
-      // DRY_RUN 에서는 GitHub 에 쓰지 않습니다. (호출 자체는 3단계 B1 에서 제거)
-      if (!writer.dryRun) {
-        const updatedRowData = getRowDataAsObject(masterSheet, rowIndex, headers);
-        updateObsidianFlow(testNumber, updatedRowData);
-      }
+      // B1: 옵시디언(GitHub) 갱신은 하지 않습니다 (Github.gs 는 남겨 두되 호출하지 않음)
     }
   }
 

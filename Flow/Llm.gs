@@ -4,11 +4,13 @@
 //         'blocked' (안전 차단 — 포기) / 'fatal' (400·401·403·404 — 키·모델·스키마 문제. 실행을 멈춤)
 // currentRowData 는 허용 열과 그 현재 값만 보냅니다 (담당자 등은 보내지 않음).
 function callGeminiAPI(apiKey, body, isMyEmail, date, subject, testNumber, currentRowData) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  // B4: API 키는 URL(?key=)이 아니라 헤더로 보냅니다 (URL 은 로그·오류 메시지에 남을 수 있음)
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent`;
   const payload = buildGeminiPayload(body, isMyEmail, date, subject, testNumber, currentRowData);
   const options = {
     method: 'post',
     contentType: 'application/json',
+    headers: { 'x-goog-api-key': apiKey },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   };
