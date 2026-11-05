@@ -50,13 +50,25 @@ function logMessage(logSheet, msgId, timestamp, result) {
   logSheet.appendRow([msgId, timestamp, result]);
 }
 
-// 6번 패치: 수식이 있는 열 대신 실제 데이터 기준으로 마지막 행을 찾는 함수 추가
-function getLastDataRow(sheet, columnNumber) {
-  const data = sheet.getRange(1, columnNumber, sheet.getMaxRows(), 1).getValues();
-  for (let i = data.length - 1; i >= 0; i--) {
-    if (data[i][0] !== "" && data[i][0] != null) {
-      return i + 1; 
-    }
+// 6번 패치 (1단계 C1 에서 다시 작성): 새 행 위치
+// 수식 열을 뺀 **모든 열**에서 마지막으로 값이 있는 행 다음 행. 데이터 시작 행(3)보다 위로는 가지 않습니다.
+// 시험번호가 빈 착수 행도 상담자·시험안내일·상태가 있으므로 덮어쓰지 않습니다.
+// values: 1행부터의 2차원 배열, skipCols: 무시할 열 번호(1부터). 순수 함수.
+function findNewRowIndex(values, skipCols, startRow) {
+  let last = 0;
+  for (let r = values.length - 1; r >= 0; r--) {
+    if (rowHasData(values[r], skipCols)) { last = r + 1; break; }
   }
-  return 1; 
+  return Math.max(last + 1, startRow);
+}
+
+function rowHasData(rowValues, skipCols) {
+  return rowValues.some((v, c) => !skipCols.includes(c + 1) && v !== '' && v !== null && v !== undefined);
+}
+
+// 수식 열(CONFIG.FORMULA_COLUMNS)의 열 번호 목록
+function getFormulaColumnIndexes(headers) {
+  const result = [];
+  headers.forEach((h, i) => { if (h && CONFIG.FORMULA_COLUMNS.includes(normalizeHeader(h))) result.push(i + 1); });
+  return result;
 }

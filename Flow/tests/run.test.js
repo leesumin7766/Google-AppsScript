@@ -178,9 +178,9 @@ test('실제 모드(DRY_RUN 끔)는 예전처럼 마스터·처리로그에 씀'
 });
 
 // =========================================================================
-// 1단계에서 고칠 것 (C1~C4) — 지금은 실패가 정상
+// 1단계 (C1~C4) — v1.3 에서 고침
 // =========================================================================
-todo('1단계 C1', '착수 메일 2건 → F열 수식이 978행까지 있어도 3행·4행에 들어감', () => {
+test('[C1] 착수 메일 2건 → F열 수식이 978행까지 있어도 3행·4행에 들어감', () => {
   const { flow, master } = setup({
     master: F.makeMaster({ formulaTo: 978 }),
     initThreads: [fakeThread('t1', [F.MAIL.init1]), fakeThread('t2', [F.MAIL.init2])],
@@ -190,7 +190,7 @@ todo('1단계 C1', '착수 메일 2건 → F열 수식이 978행까지 있어도
   assert.strictEqual(master.get(4, F.col('상담자')), '최상담');
 });
 
-todo('1단계 C1', '시험번호가 빈 착수 행(3행) 다음 착수 메일은 4행에 들어가고 3행을 덮지 않음', () => {
+test('[C1] 시험번호가 빈 착수 행(3행) 다음 착수 메일은 4행에 들어가고 3행을 덮지 않음', () => {
   const { flow, master } = setup({
     master: F.makeMaster({ formulaTo: 978, rows: [{ 상담자: '김상담', 시험안내일: '2026-11-04', 상태: '접수' }] }),
     initThreads: [fakeThread('t2', [F.MAIL.init2])],
@@ -200,14 +200,14 @@ todo('1단계 C1', '시험번호가 빈 착수 행(3행) 다음 착수 메일은
   assert.strictEqual(master.get(4, F.col('상담자')), '최상담');
 });
 
-todo('1단계 C2', 'getRowDataAsObject 키도 normalizeHeader 를 거침 (LLM 프롬프트의 키 = colMap 키)', () => {
+test('[C2] getRowDataAsObject 키도 normalizeHeader 를 거침 (LLM 프롬프트의 키 = colMap 키)', () => {
   const flow = loadFlow();
   const master = F.makeMaster({ rows: [progressRow({ 담당자: '홍길동' })] });
   const obj = flow.getRowDataAsObject(master, 3, master.data[0]);
   assert.strictEqual(obj['담당자'], '홍길동');
 });
 
-todo('1단계 C2·C3', '담당자가 채워진 행에 LLM 이 담당자를 제안해도 덮어쓰지 않음', () => {
+test('[C2·C3] 담당자가 채워진 행에 LLM 이 담당자를 제안해도 덮어쓰지 않음', () => {
   const { flow, master } = setup({
     master: F.makeMaster({ rows: [progressRow({ 담당자: '홍길동\nhong@ganada.example' })] }),
     gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
@@ -217,13 +217,13 @@ todo('1단계 C2·C3', '담당자가 채워진 행에 LLM 이 담당자를 제�
   assert.strictEqual(master.get(3, F.col('담당자')), '홍길동\nhong@ganada.example');
 });
 
-todo('1단계 C3', 'ALLOWED_COLUMNS 에 담당자·진행상황이 없음', () => {
+test('[C3] ALLOWED_COLUMNS 에 담당자·진행상황이 없음', () => {
   const flow = loadFlow();
   assert.ok(!flow.ALLOWED_COLUMNS.includes('담당자'));
   assert.ok(!flow.ALLOWED_COLUMNS.includes('진행상황'));
 });
 
-todo('1단계 C3', 'LLM 이 허용 목록 밖의 열(잔여일자 수식 열·진행상황)을 제안하면 쓰지 않음', () => {
+test('[C3] LLM 이 허용 목록 밖의 열(잔여일자 수식 열·진행상황)을 제안하면 쓰지 않음', () => {
   const { flow, master } = setup({
     master: F.makeMaster({ rows: [progressRow()] }),
     gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
@@ -234,7 +234,7 @@ todo('1단계 C3', 'LLM 이 허용 목록 밖의 열(잔여일자 수식 열·�
   assert.strictEqual(master.get(3, F.col('진행상황')), '[11/06] 패치 일정 안내');
 });
 
-todo('1단계 C3', '허용값이 아닌 상태변경(예: "완료")은 쓰지 않음', () => {
+test('[C3] 허용값이 아닌 상태변경(예: "완료")은 쓰지 않음', () => {
   const { flow, master } = setup({
     master: F.makeMaster({ rows: [progressRow()] }),
     gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
@@ -245,13 +245,13 @@ todo('1단계 C3', '허용값이 아닌 상태변경(예: "완료")은 쓰지 �
 });
 
 F.QUOTE_CASES.forEach(c => {
-  todo('1단계 C4', `cleanEmailBody: ${c.name}`, () => {
+  test(`[C4] cleanEmailBody: ${c.name}`, () => {
     const flow = loadFlow();
     assert.strictEqual(flow.cleanEmailBody(c.body), c.expected);
   });
 });
 
-todo('1단계 C4', 'LLM 에 보내는 본문에서 인용문이 잘려 있음', () => {
+test('[C4] LLM 에 보내는 본문에서 인용문이 잘려 있음', () => {
   const quoted = Object.assign({}, F.MAIL.progress1, {
     body: '패치 일정 공유드립니다.\n\n-----Original Message-----\nFrom: 시험원\n이전 메일 1차결함 2026-10-01\n',
   });
@@ -260,7 +260,7 @@ todo('1단계 C4', 'LLM 에 보내는 본문에서 인용문이 잘려 있음', 
   assert.ok(!lastLlmBody(flow).includes('이전 메일'));
 });
 
-todo('1단계 C4', '자르고 나서 본문이 거의 비면 LLM 을 부르지 않고 사유를 남김', () => {
+test('[C4] 자르고 나서 본문이 거의 비면 LLM 을 부르지 않고 사유를 남김', () => {
   const empty = Object.assign({}, F.MAIL.progress1, { body: '\n\n-----Original Message-----\nFrom: 시험원\n이전 메일\n' });
   const { flow, log } = setup({ master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [empty])], llmResponse: llm() });
   flow.runProgressCheck();
@@ -268,18 +268,114 @@ todo('1단계 C4', '자르고 나서 본문이 거의 비면 LLM 을 부르지 �
   assert.ok(String(log.get(2, 3)).includes('본문'));
 });
 
-// README "v1.1 적용 완료" 에 적혀 있지만 실제로는 호출되지 않는 것
-todo('1단계 (v1.1 미적용)', 'LLM 에 보내는 본문의 점·붙여쓴 전화번호도 가림 (maskPhoneNumber 미사용)', () => {
+// v1.1 에 적혀 있었지만 호출되지 않던 것 — v1.3 에서 연결
+test('[마스킹] LLM 에 보내는 본문의 점으로 쓴 전화번호도 가림', () => {
   const { flow } = setup({ master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
   flow.runProgressCheck();
   assert.ok(!lastLlmBody(flow).includes('010.1234.5678'));
 });
 
-todo('1단계 (v1.1 미적용)', 'getRowDataAsObject 가 Date 를 yyyy-MM-dd(Asia/Seoul) 로 바꿈', () => {
+test('[날짜] getRowDataAsObject 가 Date 를 yyyy-MM-dd(Asia/Seoul) 로 바꿈', () => {
   const flow = loadFlow();
   const master = F.makeMaster({ rows: [progressRow({ 시험시작일: F.kstDate('2026-11-10') })] });
   const obj = flow.getRowDataAsObject(master, 3, master.data[0]);
   assert.strictEqual(obj['시험시작일'], '2026-11-10');
+});
+
+// =========================================================================
+// 1단계에서 추가한 확인
+// =========================================================================
+test('[C1] F열 수식이 빈 행에도 값(숫자·오류)을 보여도 3행에 들어가고, F열 수식 칸은 건드리지 않음', () => {
+  const master = F.makeMaster({ formulaTo: 978 });
+  for (let r = 2; r <= 978; r++) master.set(r, F.col('잔여일자'), r === 3 ? 10 : '#VALUE!');
+  const { flow } = setup({ master, initThreads: [fakeThread('t1', [F.MAIL.init1])] });
+  flow.runInitiationCheck();
+  assert.strictEqual(master.get(3, F.col('상담자')), '김상담');
+  assert.strictEqual(master.get(3, F.col('잔여일자')), 10, 'F열에 "" 를 덮어쓰면 안 됨');
+});
+
+test('[C1] findNewRowIndex: 수식 열 무시, 데이터 시작 행(3) 아래로만', () => {
+  const flow = loadFlow();
+  const v = [['h1', 'h2'], ['예시', ''], ['', 5], ['', 7]];
+  assert.strictEqual(flow.findNewRowIndex(v, [2], 3), 3);
+  assert.strictEqual(flow.findNewRowIndex(v, [], 3), 5);
+  assert.strictEqual(flow.findNewRowIndex([['h']], [], 3), 3);
+});
+
+test('[C1] DRY_RUN 에서도 착수 메일 2건이 3행·4행으로 기록됨', () => {
+  const { flow, ss, master } = setup({
+    dry: true, master: F.makeMaster({ formulaTo: 978 }),
+    initThreads: [fakeThread('t1', [F.MAIL.init1]), fakeThread('t2', [F.MAIL.init2])],
+  });
+  const before = master.snapshot();
+  flow.runInitiationCheck();
+  assert.strictEqual(master.snapshot(), before);
+  const rows = simObjs(ss).filter(r => r.열 === '상담자').map(r => [r.행, r.새값]);
+  assert.deepStrictEqual(rows, [['3', '김상담'], ['4', '최상담']]);
+});
+
+test('[C2] 착수 메일: 괄호가 붙은 헤더(예: "시험시작일 (예정)")에도 값이 들어감', () => {
+  const master = F.makeMaster();
+  master.set(1, F.col('시험시작일'), '시험시작일 (예정)');
+  const { flow } = setup({ master, initThreads: [fakeThread('t1', [F.MAIL.init1])] });
+  flow.runInitiationCheck();
+  assert.strictEqual(master.get(3, F.col('시험시작일')), '2026-11-10');
+});
+
+test('[C2·C3] checkLlmUpdates: 괄호 붙은 열 이름 정규화, 형식·허용값·충돌 검사', () => {
+  const flow = loadFlow();
+  const colMap = flow.getColumnMap(F.makeMaster(), 1);
+  const row = { 상태: '진행', 시험종료일: '2026-12-01', 패치: null, '1차결함': null };
+  const r = JSON.parse(JSON.stringify(flow.checkLlmUpdates({
+    열갱신: [
+      { 열: '패치 (예정일)', 값: '2026-11-20' },   // 정규화 → 반영
+      { 열: '1차결함', 값: '11월 3일' },           // 날짜 형식 아님 → 확인 큐
+      { 열: '시험종료일', 값: '2026-12-05' },      // 기존값과 다름 → 확인 큐
+      { 열: '담당자', 값: '***-****-****' },       // 허용되지 않은 열 → 무시
+      { 열: '시험번호', 값: 'TTA-26-99999' },      // 허용되지 않은 열 → 무시
+    ],
+    상태변경: '진행',                              // 이미 같은 상태 → 건너뜀
+  }, row, colMap)));
+  assert.deepStrictEqual(r.updates.map(u => [u.colName, u.value]), [['패치', '2026-11-20']]);
+  assert.strictEqual(r.queueReasons.length, 2);
+  assert.ok(r.queueReasons[0].includes('1차결함') && r.queueReasons[1].includes('시험종료일'));
+  assert.deepStrictEqual(r.ignored.map(i => i.colName), ['담당자', '시험번호']);
+});
+
+test('[C3] 허용 상태값으로의 변경은 반영됨 (진행 → 종료)', () => {
+  const { flow, master } = setup({
+    master: F.makeMaster({ rows: [progressRow()] }),
+    gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+    llmResponse: llm({ 상태변경: '종료' }),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(master.get(3, F.col('상태')), '종료');
+});
+
+[
+  { name: 'Gmail 한국어가 두 줄로 꺾인 경우', body: '네 알겠습니다.\n\n2026년 11월 5일 (목) 오후 3:00, 홍길동 <a@b.example>님이\n작성:\n> 이전', expected: '네 알겠습니다.' },
+  { name: 'Outlook 한국어 머리말 묶음 (보낸 사람/보낸 날짜)', body: '수정본 첨부합니다.\n\n보낸 사람: 이시험 <t@tta.example>\n보낸 날짜: 2026년 11월 4일 화요일 오전 10:00\n받는 사람: 홍길동\n제목: 1차 결함\n\n이전 본문', expected: '수정본 첨부합니다.' },
+  { name: '줄 맨 앞 ">" 인용', body: '좋습니다.\n> 11/20 패치 가능할까요?', expected: '좋습니다.' },
+  { name: '본문 중 "보낸 사람:" 한 줄만 있으면 자르지 않음', body: '보낸 사람: 홍길동 (담당자)\n패치는 11/20 입니다.', expected: '보낸 사람: 홍길동 (담당자)\n패치는 11/20 입니다.' },
+].forEach(c => test(`[C4] cleanEmailBody: ${c.name}`, () => {
+  assert.strictEqual(loadFlow().cleanEmailBody(c.body), c.expected);
+}));
+
+test('[C4] STEP A 도 인용문을 자른 본문으로 파싱 (인용된 시험원 서명을 담당자 직급으로 읽지 않음)', () => {
+  const reply = Object.assign({}, F.MAIL.progress1, {
+    from: 'hong@ganada.example',
+    body: '패치 일정 공유드립니다.\n\n-----Original Message-----\nFrom: 이시험\n이시험 선임\n',
+  });
+  const { flow, master } = setup({ master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [reply])], llmResponse: llm() });
+  flow.runProgressCheck();
+  assert.ok(!String(master.get(3, F.col('담당자'))).includes('선임'));
+});
+
+test('[마스킹] 여러 전화번호 형식과 IP 를 가림', () => {
+  const flow = loadFlow();
+  const s = flow.maskSensitiveData('a 010-1234-5678 b 010.1234.5678 c 01012345678 d 02-123-4567 e +82 10-1234-5678 f 192.168.0.10 g 2026-11-20');
+  assert.ok(!/\d{4}[-.\s]?\d{4}\b/.test(s.replace('2026-11-20', '')), s);
+  assert.ok(s.includes('2026-11-20'), '날짜는 가리면 안 됨: ' + s);
 });
 
 // =========================================================================

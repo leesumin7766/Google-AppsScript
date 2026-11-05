@@ -6,6 +6,8 @@ const CONFIG = {
   SIM_SHEET_NAME: '시뮬레이션', // DRY_RUN 일 때만 씁니다 (사본에서만 자동 생성)
   HEADER_ROW: 1,
   DATA_START_ROW: 3,
+  // 수식 열: 스크립트가 쓰지 않고, 새 행 위치를 정할 때도 보지 않습니다 (헤더 이름, 괄호 앞부분)
+  FORMULA_COLUMNS: ['잔여일자'],
   LABEL_NAME: 'GS',
   TEST_NUM_REGEX: /[a-zA-Z]+-\d{2}-\d+/,
 

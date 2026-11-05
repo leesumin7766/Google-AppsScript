@@ -22,32 +22,46 @@ function createWriter(ss) {
     Logger.log(`🧪 DRY_RUN: '${ss.getName()}' 에 쓰지 않고 '${CONFIG.SIM_SHEET_NAME}' 탭에만 기록합니다.`);
   }
 
-  // DRY_RUN 중 '쓴 셈 친' 값. 같은 실행 안의 다음 메일이 실제 실행과 같은 값을 읽도록 합니다.
+  // DRY_RUN 중 '쓴 셈 친' 값: overlay[탭이름]['행,열'] = 값.
+  // 같은 실행 안의 다음 메일이 실제 실행과 같은 값을 읽도록 합니다.
   const overlay = {};
   // DRY_RUN 중 appendRow 가 들어갈 행 번호 (실제 appendRow 와 같은 규칙: getLastRow()+1)
   const nextRow = {};
-  const key = (sheet, row, col) => `${sheet.getName()}|${row}|${col}`;
+  const cellsOf = sheet => (overlay[sheet.getName()] = overlay[sheet.getName()] || {});
+  const has = (obj, k) => Object.prototype.hasOwnProperty.call(obj, k);
 
   function record(ctx, tab, row, col, oldValue, newValue, reason) {
     const now = Utilities.formatDate(new Date(), 'Asia/Seoul', 'yyyy-MM-dd HH:mm:ss');
     simSheet.appendRow([now, ctx.msgId, ctx.testNumber, tab, row, col, oldValue, newValue, reason].map(toSimCell));
   }
 
+  function applyOverlay(sheet, values, firstRow) {
+    if (!dryRun) return values;
+    const cells = cellsOf(sheet);
+    Object.keys(cells).forEach(k => {
+      const [r, c] = k.split(',').map(Number);
+      const i = r - firstRow;
+      if (i >= 0 && i < values.length && c <= values[i].length) values[i][c - 1] = cells[k];
+    });
+    return values;
+  }
+
   function getCellValue(sheet, row, col) {
-    const k = key(sheet, row, col);
-    if (dryRun && Object.prototype.hasOwnProperty.call(overlay, k)) return overlay[k];
+    const cells = cellsOf(sheet);
+    if (dryRun && has(cells, `${row},${col}`)) return cells[`${row},${col}`];
     return sheet.getRange(row, col).getValue();
   }
 
   function getRowValues(sheet, row, numCols) {
-    const values = sheet.getRange(row, 1, 1, numCols).getValues()[0];
-    if (dryRun) {
-      for (let c = 1; c <= numCols; c++) {
-        const k = key(sheet, row, c);
-        if (Object.prototype.hasOwnProperty.call(overlay, k)) values[c - 1] = overlay[k];
-      }
-    }
-    return values;
+    return applyOverlay(sheet, sheet.getRange(row, 1, 1, numCols).getValues(), row)[0];
+  }
+
+  // 1행부터 마지막 행까지 (DRY_RUN 이면 '쓴 셈 친' 행까지 포함)
+  function getAllValues(sheet, numCols) {
+    let lastRow = sheet.getLastRow();
+    if (dryRun) Object.keys(cellsOf(sheet)).forEach(k => { lastRow = Math.max(lastRow, Number(k.split(',')[0])); });
+    if (lastRow < 1 || numCols < 1) return [];
+    return applyOverlay(sheet, sheet.getRange(1, 1, lastRow, numCols).getValues(), 1);
   }
 
   // ctx: { msgId, testNumber, colName, reason }
@@ -57,11 +71,11 @@ function createWriter(ss) {
       return;
     }
     const oldValue = getCellValue(sheet, row, col);
-    overlay[key(sheet, row, col)] = value;
+    cellsOf(sheet)[`${row},${col}`] = value;
     record(ctx, sheet.getName(), row, ctx.colName || col, oldValue, value, ctx.reason);
   }
 
-  // ctx.headers 가 있으면 빈칸이 아닌 열마다 한 줄씩, 없으면 행 전체를 한 줄로 기록합니다.
+  // 행 전체를 한 줄로 기록합니다 (확인 큐용).
   function appendRow(sheet, rowValues, ctx) {
     if (!dryRun) {
       sheet.appendRow(rowValues);
@@ -69,13 +83,7 @@ function createWriter(ss) {
     }
     const name = sheet.getName();
     const row = nextRow[name] = (nextRow[name] || sheet.getLastRow()) + 1;
-    if (ctx.headers) {
-      rowValues.forEach((v, i) => {
-        if (v !== '' && v !== null && v !== undefined) record(ctx, name, row, ctx.headers[i], '', v, ctx.reason);
-      });
-    } else {
-      record(ctx, name, row, '(행 전체)', '', JSON.stringify(rowValues), ctx.reason);
-    }
+    record(ctx, name, row, '(행 전체)', '', JSON.stringify(rowValues), ctx.reason);
   }
 
   // 처리로그. DRY_RUN 이면 처리로그에 쓰지 않고, 남기려던 결과를 시뮬레이션에 적어 둡니다.
@@ -94,7 +102,7 @@ function createWriter(ss) {
     record(ctx, tab, '', '', '', text, ctx.reason || '');
   }
 
-  return { dryRun, getCellValue, getRowValues, setCell, appendRow, log, note };
+  return { dryRun, getCellValue, getRowValues, getAllValues, setCell, appendRow, log, note };
 }
 
 // 시뮬레이션 칸에 쓸 값: 수식으로 해석되지 않게 문자열로 바꾸고, Date 는 형식을 드러냅니다.

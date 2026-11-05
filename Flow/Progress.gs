@@ -56,7 +56,9 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
       // ----------------------------------------------------
       // [STEP A] 정형 데이터 파싱 기입 (년도, 기업명, 담당자)
       // ----------------------------------------------------
-      const parsedInfo = parseBasicInfo(subject, sender, body);
+      // C4: 이전 메일 인용문을 자른 본문만 씁니다 (인용된 남의 서명·날짜를 잘못 읽지 않게)
+      const cleanBody = cleanEmailBody(body);
+      const parsedInfo = parseBasicInfo(subject, sender, cleanBody);
       const targetHeaders = ['년도', '기업명', '담당자']; 
       
       targetHeaders.forEach(headerName => {
@@ -73,8 +75,14 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
       // ----------------------------------------------------
       // [STEP B] LLM을 통한 비정형 데이터(일정, 요약) 기입
       // ----------------------------------------------------
+      // C4: 자르고 나서 본문이 거의 비면 LLM 을 부르지 않습니다
+      if (isBodyNearlyEmpty(cleanBody)) {
+        writer.log(logSheet, msgId, date, `LLM 생략: 인용문을 자르니 본문이 비어 있음 (${testNumber})`, testNumber);
+        continue;
+      }
+
       const isMyEmail = sender.includes(CONFIG.MY_EMAIL);
-      const maskedBody = maskSensitiveData(body);
+      const maskedBody = maskSensitiveData(cleanBody);
       const currentRowData = getRowDataAsObject(masterSheet, rowIndex, headers, writer);
 
       // 신규 메일 검증 완료 시에만 Gemini 호출
@@ -87,36 +95,23 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, colMap, headers
 
       writer.note({ msgId: msgId, testNumber: testNumber, reason: 'LLM 응답 원문 (검토용)' }, 'LLM', JSON.stringify(llmResult));
 
-      let sendToQueue = false;
-      let queueReason = [];
-      const updates = [];
+      const queueReason = [];
 
       // 확신도 검사
       if (llmResult.확신도 === "낮음") {
-        sendToQueue = true;
         queueReason.push(`확신도 낮음: ${llmResult.불확실한이유}`);
       }
 
-      // 열 갱신 충돌 검사
-      if (llmResult.열갱신 && Array.isArray(llmResult.열갱신)) {
-        for (const update of llmResult.열갱신) {
-          const colName = update.열;
-          if (!colMap[colName]) continue;
-          
-          const currentVal = currentRowData[colName];
-          if (currentVal && currentVal.toString().trim() !== "") {
-            sendToQueue = true;
-            queueReason.push(`[${colName}] 덮어쓰기 충돌 (기존값: ${currentVal})`);
-          } else {
-            updates.push({ colIndex: colMap[colName], colName: colName, value: update.값, reason: 'LLM: 열갱신' });
-          }
-        }
-      }
-
-      // 상태 변경
-      if (llmResult.상태변경) {
-        updates.push({ colIndex: colMap['상태'], colName: '상태', value: llmResult.상태변경, reason: 'LLM: 상태변경' });
-      }
+      // C2·C3: 허용 열·상태 허용값·날짜 형식·덮어쓰기 충돌을 코드로 검사 (원칙 1·2)
+      const check = checkLlmUpdates(llmResult, currentRowData, colMap);
+      check.queueReasons.forEach(r => queueReason.push(r));
+      check.ignored.forEach(i => {
+        Logger.log(`LLM 제안 무시 (${testNumber}) [${i.colName}] ${i.value}: ${i.reason}`);
+        writer.note({ msgId: msgId, testNumber: testNumber, reason: `LLM 제안 무시: ${i.reason}` }, CONFIG.MASTER_SHEET_NAME,
+                    `[${i.colName}] ${i.value}`);
+      });
+      const updates = check.updates.map(u => ({ colIndex: colMap[u.colName], colName: u.colName, value: u.value, reason: u.reason }));
+      const sendToQueue = queueReason.length > 0;
 
       // 최종 반영 분기
       if (sendToQueue) {
