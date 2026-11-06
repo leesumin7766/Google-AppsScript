@@ -940,6 +940,13 @@ test('[계약] 허용값·LLM 허용 열이 문서에 그대로 적혀 있음', 
    flow.CONFIG.TODO_SHEET_NAME, flow.CONFIG.SIM_SHEET_NAME].forEach(n => assert.ok(CONTRACT.includes('| `' + n + '` |'), `탭 목록에 ${n}`));
 });
 
+test('[계약] contract.json 이 코드와 같음', () => {
+  const { buildContract, serializeContract, OUT_PATH } = require('./export-contract');
+  const expected = serializeContract(buildContract());
+  const actual = require('fs').readFileSync(OUT_PATH, 'utf8');
+  assert.ok(actual === expected, 'contract.json 이 코드와 다릅니다. node Flow/tests/export-contract.js 로 다시 만드세요');
+});
+
 let pass = 0, fail = 0, todoFail = 0, fixed = 0;
 for (const t of tests) {
   let err = null;

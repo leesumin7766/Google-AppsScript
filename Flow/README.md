@@ -36,7 +36,7 @@ Gmail ──▶ [Flow 엔진 (이 프로젝트, Apps Script)] ──▶ 구글 �
 | `Github.gs` | 옵시디언 Flow.md 갱신 — **사용 중단**. 파일은 남겨 두었지만 v1.5 부터 어디서도 호출하지 않습니다 |
 | `SHEET_CONTRACT.md` | 시트 계약 (Flow ↔ ATDT). 탭·열·쓰는 쪽·형식·허용값·ID 규칙·스키마 버전. 테스트 `[계약]` 이 코드와 맞는지 확인 |
 | `appsscript.json` | 타임존 Asia/Seoul, V8 |
-| `tests/` | Node 테스트 (`node Flow/tests/run.test.js`). 가짜 시트·메일로 실제 `.gs` 를 실행. Apps Script 에는 올리지 않음 |
+| `tests/` | Node 테스트 (`node Flow/tests/run.test.js`). 가짜 시트·메일로 실제 `.gs` 를 실행. Apps Script 에는 올리지 않음. `contract.json` 은 ATDT 가 쓰는 계약 데이터(탭 이름·머리글·허용값·LLM 허용 열)로, `node Flow/tests/export-contract.js` 가 코드에서 만듭니다 |
 | `.clasp.json` | `clasp` 연결 (scriptId). `Flow/` 에서 `clasp` 를 실행합니다 (아래 [clasp](#clasp-로-올리기)) |
 | `.claspignore` | `clasp push` 에 `.gs`·`appsscript.json` 만 올림 |
 | `sampleMail/` | 실제 메일 원본(`.eml`). `tests/fixtures.js` 의 `REAL_MAIL` 이 이 내용입니다. Apps Script 에는 올리지 않음 |
