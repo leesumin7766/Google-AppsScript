@@ -3,15 +3,29 @@ const CONFIG = {
   MASTER_SHEET_NAME: '마스터',
   LOG_SHEET_NAME: '처리로그',
   QUEUE_SHEET_NAME: '확인 큐',
+  TODO_SHEET_NAME: '할 일',
   SIM_SHEET_NAME: '시뮬레이션', // DRY_RUN 일 때만 씁니다 (사본에서만 자동 생성)
+  TIME_BUDGET_MS: 5 * 60 * 1000, // B3: 5분이 지나면 남은 메일은 다음 주기에
   HEADER_ROW: 1,
   DATA_START_ROW: 3,
+  // 수식 열: 스크립트가 쓰지 않고, 새 행 위치를 정할 때도 보지 않습니다 (헤더 이름, 괄호 앞부분)
+  FORMULA_COLUMNS: ['잔여일자'],
   LABEL_NAME: 'GS',
   TEST_NUM_REGEX: /[a-zA-Z]+-\d{2}-\d+/,
 
   // 새로 추가: 착수 안내 메일을 찾기 위한 검색어 (최근 3일치만 검색)
   INIT_SEARCH_QUERY: 'subject:"GS 시험 인증 시작 안내" newer_than:3d',
   GS_THREAD_LIMIT: 20,
+
+  // A3: 발신 도메인으로 시험번호를 찾을 때 쓰지 않는 도메인 (여러 업체가 함께 쓰는 도메인)
+  SHARED_MAIL_DOMAINS: ['tta.or.kr', 'gmail.com', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com',
+                        'nate.com', 'outlook.com', 'hotmail.com'],
+
+  // A2: LLM 실패 시 최대 시도 횟수
+  LLM_MAX_ATTEMPTS: 3,
+
+  // A7: LLM 이 고를 메일유형 후보
+  MAIL_TYPES: ['착수', '1차결함', '2차결함', '3차결함', '패치', '시험종료', '일정변경', '문의', '기타'],
 
   GEMINI_MODEL: 'gemini-3.8-flash',
   MY_EMAIL: 'hojun7766@tta.or.kr'
