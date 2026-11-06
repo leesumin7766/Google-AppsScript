@@ -159,11 +159,12 @@ npx @google/clasp@3.4.1 push               # Apps Script 프로젝트를 이 폴
 **아직 남은 것**: B5(F열 ARRAYFORMULA, 사람이 시트에서), 4단계(`clasp`·`SHEET_CONTRACT.md`).
 
 ### 사람이 할 일 (v1.7 기준 — 위에서부터 순서대로)
-0~4단계 코드는 `flow-dev` 브랜치에 있고, 아직 Apps Script 와 실제 시트에서는 돌려 보지 않았습니다. Apps Script 에는 지금 v1.1 이전 코드가 올라가 있습니다.
+0~4단계 코드는 `main` 에 병합되어 있습니다(PR #2). 아직 Apps Script 와 실제 시트에서는 돌려 보지 않았습니다. Apps Script 에는 지금 v1.1 이전 코드가 올라가 있습니다.
 
 **A. 코드 올리기**
-- [ ] 1. GitHub 에서 `flow-dev` → `main` PR 을 만들어 병합합니다.
+- [x] 1. GitHub 에서 `flow-dev` → `main` PR 을 만들어 병합합니다. (PR #2)
 - [ ] 2. `Flow/` 에서 `npx @google/clasp@3.4.1 push` 로 올립니다([clasp](#clasp-로-올리기)). 붙여 넣기는 필요 없습니다. 지금 편집기의 코드(v1.1 이전)는 바뀝니다 — 편집기에서 따로 고친 것이 없으면 그대로 진행합니다.
+  ⚠️ push 하면 매시간 트리거가 **다음 실행부터 새 코드로 실제 시트에 씁니다.** 실제 시트에서 바로 돌리지 않으려면 3·4번(사본·`SPREADSHEET_ID`·`DRY_RUN`)을 먼저 하고 push 합니다.
 
 **B. 사본에서 미리보기 (DRY_RUN)**
 - [ ] 3. 실제 시트의 사본을 만들고, 사본 `처리로그` 의 2행부터 지웁니다(안 지우면 지난 메일이 "처리됨" 으로 건너뜀).
