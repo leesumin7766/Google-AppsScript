@@ -16,6 +16,7 @@ function runInitiationCheck() {
     if (!ensureLogHeaders(logSheet, writer.dryRun)) return;
 
     const headers = getHeaders(masterSheet, CONFIG.HEADER_ROW);
+    checkMasterColumns(getColumnMap(masterSheet, CONFIG.HEADER_ROW)); // D1: 로그만 (착수 메일은 시험번호가 없어도 됨)
     const processedIds = getProcessedMessageIds(logSheet);
 
     Logger.log('🚀 [착수 메일 감지] 시작');
@@ -45,6 +46,10 @@ function runProgressCheck() {
 
     const colMap = getColumnMap(masterSheet, CONFIG.HEADER_ROW);
     const headers = getHeaders(masterSheet, CONFIG.HEADER_ROW);
+    if (!checkMasterColumns(colMap)) {
+      Logger.log("오류: 마스터 1행에 '시험번호' 열이 없어 진행 메일을 처리할 수 없습니다. 실행을 멈춥니다.");
+      return;
+    }
 
     // B2: 사람·ATDT 가 확인 큐에서 정한 것을 먼저 반영 (onEdit 를 놓친 것 포함)
     applyQueueDecisions(queueSheet, masterSheet, colMap, writer);

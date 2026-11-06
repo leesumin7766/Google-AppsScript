@@ -44,12 +44,12 @@ test('parseInitiationEmail: 착수 메일에서 상담자·날짜·WD·시험원
   });
 });
 
-test('parseBasicInfo: 제목에서 기업명, 발신자·서명에서 담당자 4줄', () => {
+test('parseBasicInfo: 제목에서 기업명, 발신자·서명에서 담당자 3줄 (이름 직급 / 메일 / 전화 가림)', () => {
   const flow = loadFlow();
   const m = F.MAIL.progress1;
   const r = flow.parseBasicInfo(m.subject, m.from, m.body);
   assert.strictEqual(r['기업명'], '가나다소프트');
-  assert.strictEqual(r['담당자'], '홍길동\nhong@ganada.example\n***_****_****\n선임연구원');
+  assert.strictEqual(r['담당자'], '홍길동 선임연구원\nhong@ganada.example\n***-****-****');
 });
 
 test('maskSensitiveData: 하이픈 휴대폰 번호와 IP 를 가림', () => {
@@ -577,7 +577,7 @@ test('[A4] 내가 보낸 메일이면 STEP A(년도·기업명·담당자)를 �
 test('[A5] 이름에 정규식 특수문자가 있어도 멈추지 않음', () => {
   const flow = loadFlow();
   const r = flow.parseBasicInfo('[GS] TTA-26-00001 가나다', '"(주)홍길동 [영업*]" <h@ganada.example>', '(주)홍길동 [영업*] 팀장\n');
-  assert.strictEqual(r['담당자'].split('\n').pop(), '팀장');
+  assert.strictEqual(r['담당자'].split('\n')[0], '(주)홍길동 [영업*] 팀장');
 });
 
 test('[A6] 년도는 시험번호에서 (TTA-25-… → 2025), 없으면 빈칸', () => {
@@ -817,6 +817,89 @@ test('[B4] API 키는 URL 이 아니라 x-goog-api-key 헤더로', () => {
 });
 
 // =========================================================================
+// 5단계 D2: 실제 메일 (sampleMail/)
+// =========================================================================
+const realRow = (over) => Object.assign({ 시험번호: 'TTA-26-00002', 상태: '진행', 시험시작일: F.kstDate('2026-11-08') }, over || {});
+const realLlm = () => llm({
+  시험번호: 'TTA-26-00002', 메일유형: '일정변경', 요약: '결함리포트·패치 일정 확정 회신',
+  열갱신: [{ 열: '1차결함', 값: '2026-11-27' }, { 열: '2차결함', 값: '2026-12-11' }, { 열: '패치', 값: '2026-12-23' }, { 열: '3차결함', 값: '2026-12-30' }],
+});
+
+test('[D2] 실제 메일: 인용문 절삭이 일정 4줄과 업체 서명을 남김', () => {
+  const body = loadFlow().cleanEmailBody(F.REAL_MAIL.schedule.body);
+  ['2026-11-27', '2026-12-11', '2026-12-23', '2026-12-30', 'usagi@chiikawa.com'].forEach(s => assert.ok(body.includes(s), s));
+  assert.ok(!body.includes(String.fromCharCode(13)), 'CR 이 남음');
+});
+
+test('[D2] 실제 메일: 제목에서 시험번호·기업명, LLM 본문에서 전화번호를 가림', () => {
+  const flow = loadFlow();
+  const m = F.REAL_MAIL.schedule;
+  assert.deepStrictEqual(Array.from(flow.extractTestNumbers([m.subject])), ['TTA-26-00002']);
+  assert.strictEqual(flow.parseBasicInfo(m.subject, m.from, m.body)['기업명'], '주식회사 치이카와');
+  const masked = flow.maskSensitiveData(flow.cleanEmailBody(m.body));
+  assert.ok(!masked.includes('010-7777-3333') && !masked.includes('010-9540-0035'), masked);
+});
+
+test('[D2] 실제 메일(내가 보냄): 일정 4개 반영, 담당자·기업명은 건드리지 않음, 처리로그 완료', () => {
+  const { flow, master, log } = setup({
+    master: F.makeMaster({ rows: [realRow()] }),
+    gsThreads: [fakeThread('th-real', [F.REAL_MAIL.schedule])],
+    llmResponse: realLlm(),
+  });
+  flow.runProgressCheck();
+  const sent = lastLlmBody(flow);
+  assert.ok(sent.includes('2026-12-30') && !sent.includes('010-7777-3333'), 'LLM 에 보낸 본문');
+  assert.strictEqual(master.get(3, F.col('1차결함')), '2026-11-27');
+  assert.strictEqual(master.get(3, F.col('2차결함')), '2026-12-11');
+  assert.strictEqual(master.get(3, F.col('패치')), '2026-12-23');
+  assert.strictEqual(master.get(3, F.col('3차결함')), '2026-12-30');
+  assert.strictEqual(master.get(3, F.col('진행상황')), '[10/30] 결함리포트·패치 일정 확정 회신');
+  assert.strictEqual(master.get(3, F.col('담당자')), '');
+  assert.strictEqual(log.get(2, 4), '완료');
+});
+
+test('[D2] 같은 메일을 업체가 보냈다면: 담당자 3줄(서명의 긴 직급)·기업명·년도를 채움', () => {
+  const vendor = Object.assign({}, F.REAL_MAIL.schedule, { id: 'real-1v', from: '우사기 <usagi@chiikawa.com>' });
+  const { flow, master } = setup({
+    master: F.makeMaster({ rows: [realRow()] }),
+    gsThreads: [fakeThread('th-real', [vendor])],
+    llmResponse: realLlm(),
+  });
+  flow.runProgressCheck();
+  assert.strictEqual(master.get(3, F.col('담당자')), ['우사기 수석연구원', 'usagi@chiikawa.com', '***-****-****'].join(String.fromCharCode(10)));
+  assert.strictEqual(master.get(3, F.col('기업명')), '주식회사 치이카와');
+  assert.strictEqual(String(master.get(3, F.col('년도'))), '2026');
+});
+
+// =========================================================================
+// 5단계 D1: 실제 헤더 (fixtures.js 의 MASTER_HEADERS = 실제 시트 1행)
+// =========================================================================
+test('[D1] 실제 마스터 헤더에는 Flow 가 쓰는 열이 모두 있음', () => {
+  const { flow, master } = setup({});
+  const map = flow.getColumnMap(master, 1);
+  assert.strictEqual(JSON.stringify(flow.findMissingColumns(map, flow.requiredMasterColumns())), '[]');
+  assert.strictEqual(map['진행상황'], 41, 'AO열');
+  assert.strictEqual(map['잔여일자'], 6, 'F열');
+  assert.strictEqual(map['시험종료일'], 19, 'S열 (F열 수식이 보는 열)');
+});
+
+test('[D1] 열이 없으면 실행 로그에 남기고, 시험번호 열이 없으면 진행 메일 처리를 멈춤', () => {
+  const master = F.makeMaster({ rows: [progressRow()] });
+  master.set(1, F.col('1차결함'), '1차 결함');            // 이름이 달라진 경우
+  const a = setup({ master, gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  a.flow.runProgressCheck();
+  assert.ok(a.flow.logs.some(l => l.includes('없는 열: 1차결함')), a.flow.logs.join('\n'));
+  assert.strictEqual(a.flow.fetches.length, 1, '다른 열은 그대로 처리');
+
+  const m2 = F.makeMaster({ rows: [progressRow()] });
+  m2.set(1, F.col('시험번호'), '번호2');
+  const b = setup({ master: m2, gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  b.flow.runProgressCheck();
+  assert.strictEqual(b.flow.fetches.length, 0);
+  assert.ok(b.flow.logs.some(l => l.includes("'시험번호' 열이 없어")));
+});
+
+// =========================================================================
 // 4단계: SHEET_CONTRACT.md 의 탭 표가 코드의 머리글·허용값과 맞는지
 // =========================================================================
 const CONTRACT = require('fs').readFileSync(require('path').join(__dirname, '..', 'SHEET_CONTRACT.md'), 'utf8');
@@ -834,6 +917,15 @@ test('[계약] 확인 큐·할 일·처리로그·시뮬레이션 열 목록이 
   assert.strictEqual(JSON.stringify(contractColumns('할 일')), JSON.stringify(flow.TODO_HEADERS));
   assert.strictEqual(JSON.stringify(contractColumns('처리로그')), JSON.stringify(flow.LOG_HEADERS));
   assert.strictEqual(JSON.stringify(contractColumns('시뮬레이션')), JSON.stringify(flow.SIM_HEADERS));
+});
+
+test('[계약] 마스터 A~AO 키가 실제 헤더와 같고, Flow 가 쓰는 열은 쓰는 쪽에 Flow 로 적혀 있음', () => {
+  const { flow } = setup({});
+  assert.strictEqual(JSON.stringify(contractColumns('마스터')), JSON.stringify(F.MASTER_HEADERS.map(h => flow.normalizeHeader(h))));
+  const sec = CONTRACT.split(/\n(?=## )/).find(s => s.split('\n')[0].includes('`마스터`'));
+  const writers = {};
+  sec.split('\n').forEach(l => { const m = l.match(/^\| [A-Z]{1,2} \| `([^`]+)` \| ([^|]+) \|/); if (m) writers[m[1]] = m[2]; });
+  flow.requiredMasterColumns().filter(c => c !== '시험번호').forEach(c => assert.ok(/Flow/.test(writers[c] || ''), `${c}: ${writers[c]}`));
 });
 
 test('[계약] 허용값·LLM 허용 열이 문서에 그대로 적혀 있음', () => {

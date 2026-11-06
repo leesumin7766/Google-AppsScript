@@ -1,3 +1,7 @@
+const MASKED_PHONE = '***-****-****';
+// 직급 후보. 긴 것을 앞에 둡니다 (같은 위치에서는 앞쪽 후보부터 맞춰 봄)
+const TITLE_WORDS = '수석연구원|책임연구원|전임연구원|선임연구원|팀장|과장|대리|사원|책임|선임|수석|연구원|매니저|이사|대표|부장|차장';
+
 // 1. 기존 진행 건의 기본 정보(년도, 기업명, 담당자) 파싱
 // testNumber 를 주면 그 번호로, 없으면 제목의 번호로 년도를 정합니다 (A6: TTA-26-00001 → 2026)
 function parseBasicInfo(subject, sender, body, testNumber) {
@@ -15,23 +19,26 @@ function parseBasicInfo(subject, sender, body, testNumber) {
     email = senderMatch[2].trim();
   }
 
-  // 연락처 추출 (마스킹 처리: ***_****_****)
+  // 연락처: 번호는 시트에 남기지 않고 자리만 표시합니다 (D2: 마스터 2행과 같은 ***-****-****)
   let phone = "";
-  const phoneMatch = body.match(/(010|02|0[3-9]{1,2})[-.\s]?\d{3,4}[-.\s]?\d{4}|\*{3}_\*{4}_\*{4}/);
+  const phoneMatch = body.match(/(010|02|0[3-9]{1,2})[-.\s]?\d{3,4}[-.\s]?\d{4}|\*{3}[-_]\*{4}[-_]\*{4}/);
   if (phoneMatch) {
-    phone = "***_****_****";
+    phone = MASKED_PHONE;
   }
 
   // 직급 추출 (수석연구원, 책임연구원 등 복합 직급 우선 탐색)
   let title = "";
   // A5: 이름에 특수문자가 있어도 정규식이 깨지지 않게 이스케이프
-  const titleRegex = new RegExp(escapeRegExp(name) + "\\s*(수석연구원|책임연구원|전임연구원|선임연구원|팀장|과장|대리|사원|책임|선임|수석|연구원|매니저|이사|대표|부장|차장)", "i");
-  const titleMatch = body.match(titleRegex);
-  if (titleMatch) {
-    title = titleMatch[1];
+  // D2: 본문에 여러 번 나오면 가장 긴 직급 (예: 인사말 "우사기 수석입니다" + 서명 "우사기 수석연구원" → 수석연구원)
+  const titleRegex = new RegExp(escapeRegExp(name) + "\\s*(" + TITLE_WORDS + ")", "gi");
+  const titles = [];
+  let tm;
+  while ((tm = titleRegex.exec(body)) !== null) titles.push(tm[1]);
+  if (titles.length) {
+    title = titles.sort((a, b) => b.length - a.length)[0];
   } else {
     // 발신자 이름과 붙어있지 않고 서명 등에 단독 기재된 경우 대비
-    const altTitleMatch = body.match(/([가-힣]{2,4})\s+(수석연구원|책임연구원|전임연구원|선임연구원|팀장|과장|대리|사원|책임|선임|수석|연구원|매니저|이사|대표|부장|차장)/);
+    const altTitleMatch = body.match(new RegExp("([가-힣]{2,4})\\s+(" + TITLE_WORDS + ")"));
     if (altTitleMatch) {
       if (!name || name.includes("@")) name = altTitleMatch[1];
       title = altTitleMatch[2];
@@ -44,12 +51,12 @@ function parseBasicInfo(subject, sender, body, testNumber) {
     email = bodyEmailMatch[1];
   }
 
-  // [수정] 4줄 줄바꿈 조합: 이름 -> 이메일 -> 전화번호 -> 직급
+  // D2: 마스터 2행과 같은 3줄 — "이름 직급" / 메일 / 전화번호(가림)
   const managerLines = [];
-  if (name) managerLines.push(name);
+  const nameLine = [name, title].filter(Boolean).join(' ');
+  if (nameLine) managerLines.push(nameLine);
   if (email) managerLines.push(email);
   if (phone) managerLines.push(phone);
-  if (title) managerLines.push(title);
 
   const managerInfo = managerLines.join("\n");
 

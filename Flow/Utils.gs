@@ -20,6 +20,24 @@ function getColumnMap(sheet, headerRow) {
   return colMap;
 }
 
+// D1: Flow 가 쓰는 마스터 열. 없으면 그 열의 값은 조용히 버려지므로 실행할 때마다 로그를 남깁니다.
+function requiredMasterColumns() {
+  return ['시험번호', '년도', '기업명', '담당자', '상태', '진행상황',
+          '상담자', '시험안내일', 'WD', '시험원'].concat(LLM_DATE_COLUMNS);
+}
+
+// 반환: 없는 열 이름 목록 (순수 함수)
+function findMissingColumns(colMap, required) {
+  return required.filter((c, i) => required.indexOf(c) === i && !colMap[c]);
+}
+
+// 없는 열을 로그로 남깁니다. 시험번호 열이 없으면 false (진행 메일은 행을 찾을 수 없으니 멈춤).
+function checkMasterColumns(colMap) {
+  const missing = findMissingColumns(colMap, requiredMasterColumns());
+  if (missing.length) Logger.log(`⚠️ 마스터 1행에 없는 열: ${missing.join(', ')} — 이 열에 들어갈 값은 쓰지 않습니다.`);
+  return !missing.includes('시험번호');
+}
+
 function getHeaders(sheet, headerRowIndex) {
   const lastCol = sheet.getLastColumn();
   return sheet.getRange(headerRowIndex, 1, 1, lastCol).getValues()[0];
