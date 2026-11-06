@@ -943,7 +943,8 @@ test('[계약] 허용값·LLM 허용 열이 문서에 그대로 적혀 있음', 
 test('[계약] contract.json 이 코드와 같음', () => {
   const { buildContract, serializeContract, OUT_PATH } = require('./export-contract');
   const expected = serializeContract(buildContract());
-  const actual = require('fs').readFileSync(OUT_PATH, 'utf8');
+  // 줄바꿈만 다른 경우(Windows autocrlf 로 받은 CRLF 파일)는 같은 것으로 봅니다
+  const actual = require('fs').readFileSync(OUT_PATH, 'utf8').replace(/\r\n/g, '\n');
   assert.ok(actual === expected, 'contract.json 이 코드와 다릅니다. node Flow/tests/export-contract.js 로 다시 만드세요');
 });
 
