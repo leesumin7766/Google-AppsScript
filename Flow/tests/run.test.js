@@ -775,6 +775,42 @@ test('[B2] onQueueEdit: 확인 큐를 고치면 바로 반영, 다른 탭 편집
   assert.strictEqual(flow.triggers[0].id, F.COPY_ID);
 });
 
+// [F-02] ATDT 가 API 로 쓴 결정: onEdit 없이 매시간 실행 시작 때 반영 (계약 4장)
+test('[F-02] ATDT 가 제안값을 문자열 2026-11-20 으로 고친 뒤 적용 → 고친 값이 반영됨', () => {
+  const ss = queueWithConflict();
+  const queue = ss.getSheetByName('확인 큐');
+  queue.set(2, qcol('제안값'), '2026-11-23');   // ATDT 가 먼저 쓴 값
+  queue.set(2, qcol('제안값'), '2026-11-20');   // ATDT 가 다시 고친 값 (문자열)
+  queue.set(2, qcol('처리'), '적용');
+  progressRun(ss, { gsThreads: [], llmResponse: llm() });
+  assert.strictEqual(ss.getSheetByName('마스터').get(3, F.col('패치')), '2026-11-20');
+  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(queue.get(2, qcol('처리시각'))));
+});
+
+test('[F-02] 시트가 제안값을 Date(KST 자정)로 바꿔 저장해도 적용됨', () => {
+  const ss = queueWithConflict();
+  const queue = ss.getSheetByName('확인 큐');
+  queue.set(2, qcol('제안값'), F.kstDate('2026-11-21'));   // 시트가 날짜 값으로 저장한 모습
+  queue.set(2, qcol('처리'), '적용');
+  progressRun(ss, { gsThreads: [], llmResponse: llm() });
+  assert.strictEqual(ss.getSheetByName('마스터').get(3, F.col('패치')), '2026-11-21');
+  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(queue.get(2, qcol('처리시각'))));
+});
+
+test('[F-02] 적용 거절 사유는 계약 형식 "<이전 사유> / 적용 안 함(<시각>): <까닭>" 이고 처리는 대기로 돌아감', () => {
+  const ss = queueWithConflict();
+  const queue = ss.getSheetByName('확인 큐'), master = ss.getSheetByName('마스터');
+  const before = queue.get(2, qcol('사유'));
+  master.set(3, F.col('패치'), '2026-11-25');
+  queue.set(2, qcol('처리'), '적용');
+  progressRun(ss, { gsThreads: [], llmResponse: llm() });
+  const reason = String(queue.get(2, qcol('사유')));
+  assert.ok(reason.startsWith(before + ' / 적용 안 함('), reason);
+  assert.ok(/^ \/ 적용 안 함\(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\): .+$/.test(reason.slice(before.length)), reason);
+  assert.strictEqual(queue.get(2, qcol('처리')), '대기');
+  assert.strictEqual(master.get(3, F.col('패치')), '2026-11-25');
+});
+
 test('[B2] DRY_RUN 은 확인 큐 결정을 반영하지 않고 기록만', () => {
   const ss = queueWithConflict();
   const queue = ss.getSheetByName('확인 큐');
