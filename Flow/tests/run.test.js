@@ -817,6 +817,37 @@ test('[B4] API 키는 URL 이 아니라 x-goog-api-key 헤더로', () => {
 });
 
 // =========================================================================
+// 4단계: SHEET_CONTRACT.md 의 탭 표가 코드의 머리글·허용값과 맞는지
+// =========================================================================
+const CONTRACT = require('fs').readFileSync(require('path').join(__dirname, '..', 'SHEET_CONTRACT.md'), 'utf8');
+// '## N. `탭`' 절 안의 '| A | `이름` |' 행 → 이름 목록
+function contractColumns(tab) {
+  const sections = CONTRACT.split(/\n(?=## )/);
+  const sec = sections.find(s => s.startsWith(`## `) && s.split('\n')[0].includes('`' + tab + '`'));
+  assert.ok(sec, `SHEET_CONTRACT.md 에 '${tab}' 절이 없음`);
+  return sec.split('\n').map(l => l.match(/^\| ([A-Z]{1,2}) \| `([^`]+)` \|/)).filter(Boolean).map(m => m[2]);
+}
+
+test('[계약] 확인 큐·할 일·처리로그·시뮬레이션 열 목록이 코드와 같음', () => {
+  const { flow } = setup({});
+  assert.strictEqual(JSON.stringify(contractColumns('확인 큐')), JSON.stringify(flow.QUEUE_HEADERS));
+  assert.strictEqual(JSON.stringify(contractColumns('할 일')), JSON.stringify(flow.TODO_HEADERS));
+  assert.strictEqual(JSON.stringify(contractColumns('처리로그')), JSON.stringify(flow.LOG_HEADERS));
+  assert.strictEqual(JSON.stringify(contractColumns('시뮬레이션')), JSON.stringify(flow.SIM_HEADERS));
+});
+
+test('[계약] 허용값·LLM 허용 열이 문서에 그대로 적혀 있음', () => {
+  const { flow } = setup({});
+  const inline = list => list.map(v => '`' + v + '`').join('·');
+  assert.ok(CONTRACT.includes(inline(flow.QUEUE_DECISIONS)), '확인 큐 처리 값');
+  assert.ok(CONTRACT.includes(inline(flow.TODO_STATUSES)), '할 일 상태 값');
+  assert.ok(CONTRACT.includes(inline(flow.VALID_STATUSES)), '마스터 상태 값');
+  assert.ok(CONTRACT.includes(inline(Object.values(flow.LOG_STATUS))), '처리로그 상태 값');
+  assert.ok(CONTRACT.includes(inline(flow.ALLOWED_COLUMNS)), 'LLM 허용 열');
+  [flow.CONFIG.MASTER_SHEET_NAME, flow.CONFIG.LOG_SHEET_NAME, flow.CONFIG.QUEUE_SHEET_NAME,
+   flow.CONFIG.TODO_SHEET_NAME, flow.CONFIG.SIM_SHEET_NAME].forEach(n => assert.ok(CONTRACT.includes('| `' + n + '` |'), `탭 목록에 ${n}`));
+});
+
 let pass = 0, fail = 0, todoFail = 0, fixed = 0;
 for (const t of tests) {
   let err = null;

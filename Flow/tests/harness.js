@@ -163,7 +163,8 @@ function loadFlow(opts) {
   vm.createContext(sandbox);
 
   const code = GS_FILES.map(f => `// ---- ${f}\n` + fs.readFileSync(path.join(FLOW_DIR, f), 'utf8')).join('\n') +
-    '\n;globalThis.__consts = { CONFIG, ALLOWED_COLUMNS, VALID_STATUSES, SIM_HEADERS, QUEUE_HEADERS, TODO_HEADERS };';
+    '\n;globalThis.__consts = { CONFIG, ALLOWED_COLUMNS, VALID_STATUSES, SIM_HEADERS, QUEUE_HEADERS, TODO_HEADERS, ' +
+    'QUEUE_DECISIONS, TODO_STATUSES, LOG_HEADERS, LOG_STATUS };';
   vm.runInContext(code, sandbox, { filename: 'flow-bundle.gs' });
 
   return Object.assign(sandbox, sandbox.__consts, { logs, fetches, searches, props, triggers });
