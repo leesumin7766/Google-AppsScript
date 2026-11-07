@@ -476,6 +476,8 @@ test('[실환경] 503 이면 같은 실행 안에서 3초 뒤 한 번 더 부르
   let n = 0;
   const f = progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: () => (++n === 1 ? { __status: 503 } : llm()) });
   assert.strictEqual(f.fetches.length, 2, '한 번 더 부름');
+  assert.ok(f.fetches[0].url.includes('/models/gemini-3.5-flash-lite:'), '기본 모델');
+  assert.ok(f.fetches[1].url.includes('/models/gemini-flash-lite-latest:'), '두 번째는 대체 모델');
   assert.deepStrictEqual(f.sleeps, [3000]);
   assert.deepStrictEqual(logRows(log).map(r => [r.상태, r.시도]), [['완료', 1]], '안쪽 재시도는 시도횟수를 늘리지 않음');
 });

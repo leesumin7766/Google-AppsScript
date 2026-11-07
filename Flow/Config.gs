@@ -30,7 +30,9 @@ const CONFIG = {
   // A7: LLM 이 고를 메일유형 후보
   MAIL_TYPES: ['착수', '1차결함', '2차결함', '3차결함', '패치', '시험종료', '일정변경', '문의', '기타'],
 
-  GEMINI_MODEL: 'gemini-3.8-flash',
+  // 2026-11-07 실환경 점검(checkGemini): 3.8/3.7-flash 는 503 과부하, 3.6-flash 31초, 3.5-flash-lite 0.7초
+  GEMINI_MODEL: 'gemini-3.5-flash-lite',
+  GEMINI_FALLBACK_MODEL: 'gemini-flash-lite-latest',   // 기본 모델이 429·5xx 면 같은 실행에서 이 모델로 한 번 더
   MY_EMAIL: 'hojun7766@tta.or.kr'
 };
 

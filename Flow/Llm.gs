@@ -3,9 +3,15 @@
 //   kind: 'transient' (429·5xx·네트워크 — 다시 시도) / 'parse' (응답 해석 실패 — 다시 시도)
 //         'blocked' (안전 차단 — 포기) / 'fatal' (400·401·403·404 — 키·모델·스키마 문제. 실행을 멈춤)
 // currentRowData 는 허용 열과 그 현재 값만 보냅니다 (담당자 등은 보내지 않음).
+// 모델 이름: 스크립트 속성 GEMINI_MODEL 이 있으면 그것, 없으면 CONFIG.GEMINI_MODEL (2026-11-07 실환경: 모델 과부하 대응)
+function geminiModel() {
+  const m = String(getSetting('GEMINI_MODEL', CONFIG.GEMINI_MODEL) || '').trim();
+  return /^[a-z0-9.-]{3,80}$/.test(m) ? m : CONFIG.GEMINI_MODEL;
+}
+
 function callGeminiAPI(apiKey, body, isMyEmail, date, subject, testNumber, currentRowData) {
   // B4: API 키는 URL(?key=)이 아니라 헤더로 보냅니다 (URL 은 로그·오류 메시지에 남을 수 있음)
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${CONFIG.GEMINI_MODEL}:generateContent`;
+  const urlFor = model => `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const payload = buildGeminiPayload(body, isMyEmail, date, subject, testNumber, currentRowData);
   const options = {
     method: 'post',
@@ -17,11 +23,13 @@ function callGeminiAPI(apiKey, body, isMyEmail, date, subject, testNumber, curre
 
   // 429·5xx·네트워크 오류는 같은 실행 안에서 한 번만 더 부릅니다 (그래도 실패하면 재시도대기 → 다음 실행)
   let result = null;
+  // 두 번째는 대체 모델로 (기본 모델 과부하 대비). 대체 모델이 기본과 같으면 같은 모델로 다시
+  const models = [geminiModel(), CONFIG.GEMINI_FALLBACK_MODEL || geminiModel()];
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) Utilities.sleep(CONFIG.LLM_INNER_RETRY_WAIT_MS);
     let response;
     try {
-      response = UrlFetchApp.fetch(url, options);
+      response = UrlFetchApp.fetch(urlFor(models[attempt]), options);
     } catch (e) {
       result = { ok: false, kind: 'transient', message: '네트워크 오류: ' + e.message };
       continue;
@@ -237,4 +245,40 @@ function checkLlmUpdates(llmResult, currentRowData, colMap) {
     }
   }
   return out;
+}
+
+
+// ---------------------------------------------------------------------------
+// 진단(편집기에서 직접 실행): 쓸 수 있는 flash 모델 목록과, 짧은 요청의 응답 코드·시간을 로그로 남깁니다.
+// 시트·메일은 건드리지 않습니다. 키는 로그에 남기지 않습니다.
+// ---------------------------------------------------------------------------
+function checkGemini() {
+  const apiKey = getSetting('GEMINI_API_KEY', '');
+  if (!apiKey) { Logger.log('GEMINI_API_KEY 없음'); return; }
+  const headers = { 'x-goog-api-key': apiKey };
+  const list = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers, muteHttpExceptions: true });
+  let names = [];
+  try {
+    names = (JSON.parse(list.getContentText()).models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => m.name.replace(/^models\//, ''))
+      .filter(n => /flash/.test(n));
+  } catch (e) { Logger.log('모델 목록 읽기 실패: HTTP ' + list.getResponseCode()); }
+  Logger.log('flash 모델(generateContent): ' + names.join(', '));
+  // 정식 텍스트 모델만(미리보기·tts·image·omni 제외), 버전 높은 순으로 최대 6개
+  const plain = names.filter(n => !/(preview|tts|image|omni)/.test(n) && n !== geminiModel())
+    .sort((x, y) => y.localeCompare(x, 'en', { numeric: true }));
+  const tryModels = [geminiModel()].concat(plain.slice(0, 6));
+  tryModels.forEach(model => {
+    const t0 = Date.now();
+    let code = 'ERR';
+    try {
+      const r = UrlFetchApp.fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'post', contentType: 'application/json', headers, muteHttpExceptions: true,
+        payload: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: '숫자 1만 답해.' }] }] }),
+      });
+      code = r.getResponseCode();
+    } catch (e) { code = 'ERR ' + e.message; }
+    Logger.log(`${model}${model === geminiModel() ? ' (지금 쓰는 모델)' : ''}: HTTP ${code}, ${((Date.now() - t0) / 1000).toFixed(1)}초`);
+  });
 }
