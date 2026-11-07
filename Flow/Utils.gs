@@ -65,16 +65,21 @@ const LOG_STATUS = { DONE: '완료', RETRY: '재시도대기', GIVE_UP: '포기'
 // D1·E1 이 비어 있으면 헤더를 적습니다. 다른 값이 있으면 false (호출 쪽은 실행을 멈춤).
 // DRY_RUN 이면 처리로그를 바꾸지 않고 검사만 합니다.
 function ensureLogHeaders(logSheet, dryRun) {
-  const current = logSheet.getRange(1, 4, 1, 2).getValues()[0];
-  for (let i = 0; i < 2; i++) {
-    const want = LOG_HEADERS[3 + i];
+  // A1~C1: 비어 있으면 계약 이름을 적음(2026-11-07 실환경: B1 '처리 시각' 이 비어 있어 ATDT 가 처리로그를 못 읽음).
+  //        다른 글이 있으면 건드리지 않고 로그만 남김(예전 시트 보호).
+  // D1·E1: 비어 있으면 적고, 다른 글이면 실행을 멈춤(A2).
+  const current = logSheet.getRange(1, 1, 1, 5).getValues()[0];
+  for (let i = 0; i < 5; i++) {
+    const want = LOG_HEADERS[i];
     const have = String(current[i] === null || current[i] === undefined ? '' : current[i]).trim();
     if (have === want) continue;
+    const cell = String.fromCharCode(65 + i) + '1';
     if (have !== '') {
-      Logger.log(`오류: 처리로그 ${i === 0 ? 'D1' : 'E1'} 에 '${want}' 대신 '${have}' 가 있습니다. 실행을 멈춥니다.`);
+      if (i < 3) { Logger.log(`경고: 처리로그 ${cell} 이 '${want}' 가 아니라 '${have}' 입니다 (ATDT 가 처리로그를 읽지 못할 수 있음).`); continue; }
+      Logger.log(`오류: 처리로그 ${cell} 에 '${want}' 대신 '${have}' 가 있습니다. 실행을 멈춥니다.`);
       return false;
     }
-    if (!dryRun) logSheet.getRange(1, 4 + i).setValue(want);
+    if (!dryRun) logSheet.getRange(1, 1 + i).setValue(want);
   }
   return true;
 }

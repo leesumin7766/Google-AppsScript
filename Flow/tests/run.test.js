@@ -505,6 +505,18 @@ test('[실환경] 남은 실행 시간이 2분 미만이면 LLM 을 부르지 �
   assert.ok(flow.logs.some(l => l.includes('다음 실행으로 미룹니다')));
 });
 
+test('[실환경] 처리로그 A1~C1 이 비어 있으면 계약 이름을 적고, 다른 글이면 그대로 두고 계속', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const log = ss.getSheetByName('처리로그');
+  log.set(1, 2, '');            // B1 비움 (실제 시트 모양)
+  log.set(1, 3, '처리 결과');   // C1 다른 글
+  const f = progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  assert.strictEqual(log.get(1, 2), '처리 시각');
+  assert.strictEqual(log.get(1, 3), '처리 결과', '다른 글은 그대로');
+  assert.ok(f.logs.some(l => l.includes('C1')));
+  assert.strictEqual(logRows(log).length, 1, '실행은 계속');
+});
+
 test('[실환경] 메일 링크 계정: MAIL_ACCOUNT 속성이 우선, 이메일 모양이 아니면 /u/0', () => {
   const flow = loadFlow({ props: { MAIL_ACCOUNT: 'Other@Example.com' } });
   assert.strictEqual(flow.mailThreadLink('t1', flow.mailAccount()), 'https://mail.google.com/mail/u/other@example.com/#all/t1');
