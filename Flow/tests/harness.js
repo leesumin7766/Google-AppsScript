@@ -104,6 +104,7 @@ function loadFlow(opts) {
   const props = Object.assign({}, opts.props || {});
   const logs = [];
   const fetches = [];
+  const sleeps = [];
   const searches = [];
   const triggers = [];
 
@@ -113,6 +114,7 @@ function loadFlow(opts) {
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null) }) },
     Utilities: {
       formatDate,
+      sleep: ms => { sleeps.push(ms); },
       base64Encode: b => Buffer.from(b).toString('base64'),
       base64Decode: s => Array.from(Buffer.from(s, 'base64')),
       newBlob: d => ({ getBytes: () => Array.from(Buffer.from(String(d))), getDataAsString: () => Buffer.from(d).toString('utf8') }),
@@ -167,7 +169,7 @@ function loadFlow(opts) {
     'QUEUE_DECISIONS, TODO_STATUSES, LOG_HEADERS, LOG_STATUS };';
   vm.runInContext(code, sandbox, { filename: 'flow-bundle.gs' });
 
-  return Object.assign(sandbox, sandbox.__consts, { logs, fetches, searches, props, triggers });
+  return Object.assign(sandbox, sandbox.__consts, { logs, fetches, sleeps, searches, props, triggers });
 }
 
 // LLM 에 실제로 보낸 본문 (가장 최근 호출)

@@ -76,12 +76,26 @@ function clipText(s) {
 }
 
 // ---------------------------------------------------------------------------
+// 메일 링크: 한 브라우저에 구글 계정이 여러 개면 /u/0 은 다른 계정일 수 있어 계정 이메일을 넣습니다 (2026-11-07 실환경).
+// account 가 이메일 모양이 아니면 예전처럼 /u/0.
+// ---------------------------------------------------------------------------
+function mailThreadLink(threadId, account) {
+  const acct = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(String(account || '')) ? String(account).toLowerCase() : '0';
+  return `https://mail.google.com/mail/u/${acct}/#all/${threadId}`;
+}
+
+// 메일 링크에 넣을 계정: 스크립트 속성 MAIL_ACCOUNT, 없으면 CONFIG.MY_EMAIL
+function mailAccount() {
+  return getSetting('MAIL_ACCOUNT', CONFIG.MY_EMAIL);
+}
+
+// ---------------------------------------------------------------------------
 // 확인 큐 행 (B2): 변경 1건당 1행. 순수 함수.
 // items: [{ colName, current, value, reason }]
 // ---------------------------------------------------------------------------
 function buildQueueRows(opts) {
   const now = opts.now;
-  const link = `https://mail.google.com/mail/u/0/#all/${opts.threadId}`;   // 보관함 메일도 열림
+  const link = mailThreadLink(opts.threadId, opts.account);   // 보관함 메일도 열림
   const raw = clipText(typeof opts.llmRaw === 'string' ? opts.llmRaw : JSON.stringify(opts.llmRaw, null, 2));
   const items = opts.items.length ? opts.items : [{ colName: '', current: '', value: '', reason: opts.fallbackReason || '' }];
   return items.map((it, i) => [

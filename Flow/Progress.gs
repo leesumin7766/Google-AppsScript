@@ -51,7 +51,7 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, todoSheet, colM
 
       // B2: 확인 큐에 변경 1건당 1행
       const writeQueue = (testNumber, items, llmRaw, fallbackReason) => {
-        buildQueueRows({ now: nowText(), testNumber, msgId, threadId, items, llmRaw, fallbackReason }).forEach(row =>
+        buildQueueRows({ now: nowText(), testNumber, msgId, threadId, items, llmRaw, fallbackReason, account: mailAccount() }).forEach(row =>
           writer.appendRow(queueSheet, row, { msgId: msgId, testNumber: testNumber, reason: `확인 큐: [${row[5]}] ${row[8]}` }));
       };
 
@@ -128,6 +128,11 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, todoSheet, colM
       const maskedBody = maskSensitiveData(cleanBody);
       const currentRowData = getRowDataAsObject(masterSheet, rowIndex, headers, writer);
 
+      // 실환경(2026-11-07): Gemini 한 번이 몇 분 걸릴 수 있어, 남은 시간이 적으면 부르지 않고 다음 실행으로 넘깁니다(처리로그 없음)
+      if (deadline && deadline.remainingMs && deadline.remainingMs() < CONFIG.LLM_MIN_REMAINING_MS) {
+        Logger.log('⏱️ 남은 실행 시간이 적어 LLM 호출을 다음 실행으로 미룹니다.');
+        break threadLoop;
+      }
       const res = callGeminiAPI(apiKey, maskedBody, isMyEmail, date, subject, testNumber, currentRowData);
       const attempts = prevAttempts + 1;
 

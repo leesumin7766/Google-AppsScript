@@ -15,13 +15,21 @@ function callGeminiAPI(apiKey, body, isMyEmail, date, subject, testNumber, curre
     muteHttpExceptions: true
   };
 
-  let response;
-  try {
-    response = UrlFetchApp.fetch(url, options);
-  } catch (e) {
-    return { ok: false, kind: 'transient', message: '네트워크 오류: ' + e.message };
+  // 429·5xx·네트워크 오류는 같은 실행 안에서 한 번만 더 부릅니다 (그래도 실패하면 재시도대기 → 다음 실행)
+  let result = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) Utilities.sleep(CONFIG.LLM_INNER_RETRY_WAIT_MS);
+    let response;
+    try {
+      response = UrlFetchApp.fetch(url, options);
+    } catch (e) {
+      result = { ok: false, kind: 'transient', message: '네트워크 오류: ' + e.message };
+      continue;
+    }
+    result = classifyGeminiResponse(response.getResponseCode(), response.getContentText());
+    if (result.ok || result.kind !== 'transient') return result;
   }
-  return classifyGeminiResponse(response.getResponseCode(), response.getContentText());
+  return result;
 }
 
 // 순수 함수: 프롬프트와 요청 본문 (A7)

@@ -77,5 +77,5 @@ function withScriptLock(name, fn) {
 // B3: 실행 시간 제한 (Apps Script 한도 6분 — 5분이 지나면 남은 메일은 다음 주기에)
 function createDeadline(budgetMs) {
   const end = Date.now() + (budgetMs || CONFIG.TIME_BUDGET_MS);
-  return { expired: () => Date.now() > end };
+  return { expired: () => Date.now() > end, remainingMs: () => end - Date.now() };
 }

@@ -470,6 +470,46 @@ test('[A2] 일시 오류는 같은 처리로그 행에서 3회까지 다시 시�
   assert.deepStrictEqual([log.get(1, 4), log.get(1, 5)], ['상태', '시도횟수'], 'D1·E1 헤더');
 });
 
+test('[실환경] 503 이면 같은 실행 안에서 3초 뒤 한 번 더 부르고, 성공하면 완료', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const log = ss.getSheetByName('처리로그');
+  let n = 0;
+  const f = progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: () => (++n === 1 ? { __status: 503 } : llm()) });
+  assert.strictEqual(f.fetches.length, 2, '한 번 더 부름');
+  assert.deepStrictEqual(f.sleeps, [3000]);
+  assert.deepStrictEqual(logRows(log).map(r => [r.상태, r.시도]), [['완료', 1]], '안쪽 재시도는 시도횟수를 늘리지 않음');
+});
+
+test('[실환경] 두 번 다 503 이면 재시도대기(시도 1), 4xx 는 다시 부르지 않음', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const log = ss.getSheetByName('처리로그');
+  const f = progressRun(ss, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: { __status: 503 } });
+  assert.strictEqual(f.fetches.length, 2);
+  assert.deepStrictEqual(logRows(log).map(r => [r.상태, r.시도]), [['재시도대기', 1]]);
+  const ss2 = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const f2 = progressRun(ss2, { gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: { __status: 400 } });
+  assert.strictEqual(f2.fetches.length, 1, '키·모델 오류는 한 번만');
+});
+
+test('[실환경] 남은 실행 시간이 2분 미만이면 LLM 을 부르지 않고 처리로그 없이 다음 실행으로', () => {
+  const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
+  const log = ss.getSheetByName('처리로그');
+  const flow = loadFlow({ props: { GEMINI_API_KEY: 'k', SPREADSHEET_ID: F.COPY_ID }, spreadsheets: { [F.COPY_ID]: ss },
+    gsThreads: [fakeThread('th1', [F.MAIL.progress1])], llmResponse: llm() });
+  flow.CONFIG.TIME_BUDGET_MS = 60000; // 시작부터 1분만 남음
+  flow.runProgressCheck();
+  assert.strictEqual(flow.fetches.length, 0);
+  assert.strictEqual(logRows(log).length, 0);
+  assert.ok(flow.logs.some(l => l.includes('다음 실행으로 미룹니다')));
+});
+
+test('[실환경] 메일 링크 계정: MAIL_ACCOUNT 속성이 우선, 이메일 모양이 아니면 /u/0', () => {
+  const flow = loadFlow({ props: { MAIL_ACCOUNT: 'Other@Example.com' } });
+  assert.strictEqual(flow.mailThreadLink('t1', flow.mailAccount()), 'https://mail.google.com/mail/u/other@example.com/#all/t1');
+  assert.strictEqual(flow.mailThreadLink('t1', 'not-an-email'), 'https://mail.google.com/mail/u/0/#all/t1');
+  assert.strictEqual(flow.mailThreadLink('t1', ''), 'https://mail.google.com/mail/u/0/#all/t1');
+});
+
 test('[A2] 재시도 중 성공하면 같은 행이 완료로 바뀜', () => {
   const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [progressRow()] }));
   const log = ss.getSheetByName('처리로그');
@@ -690,7 +730,8 @@ test('[B2] 확인 큐: 머리글·처리 드롭다운, 변경 1건당 1행, 보�
   assert.deepStrictEqual([...queue.validations[0].rule.list], ['대기', '적용', '무시']);
   const q = queueRows(queue);
   assert.deepStrictEqual(q.map(r => [r.ID, r.열, r.처리]), [['Q-prog-1-1', '패치', '대기'], ['Q-prog-1-2', '시험종료일', '대기']]);
-  assert.strictEqual(q[0]['메일 링크'], 'https://mail.google.com/mail/u/0/#all/th1');
+  // 2026-11-07: 계정이 여러 개인 브라우저에서도 맞는 계정으로 열리게 MY_EMAIL 을 넣음
+  assert.strictEqual(q[0]['메일 링크'], 'https://mail.google.com/mail/u/hojun7766@tta.or.kr/#all/th1');
   assert.ok(q[0]['LLM 원문'].includes('"열갱신"'));
 });
 
