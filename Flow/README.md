@@ -163,12 +163,12 @@ npx @google/clasp@3.4.1 push               # Apps Script 프로젝트를 이 폴
 
 **A. 코드 올리기**
 - [x] 1. GitHub 에서 `flow-dev` → `main` PR 을 만들어 병합합니다. (PR #2)
-- [ ] 2. `Flow/` 에서 `npx @google/clasp@3.4.1 push` 로 올립니다([clasp](#clasp-로-올리기)). 붙여 넣기는 필요 없습니다. 지금 편집기의 코드(v1.1 이전)는 바뀝니다 — 편집기에서 따로 고친 것이 없으면 그대로 진행합니다.
+- [x] 2. (2026-11-07 완료: 11개 파일 push, 원격과 일치 확인. 로컬 `.clasp.json` 은 git 제외) `Flow/` 에서 `npx @google/clasp@3.4.1 push` 로 올립니다([clasp](#clasp-로-올리기)). 붙여 넣기는 필요 없습니다. 지금 편집기의 코드(v1.1 이전)는 바뀝니다 — 편집기에서 따로 고친 것이 없으면 그대로 진행합니다.
   ⚠️ push 하면 매시간 트리거가 **다음 실행부터 새 코드로 실제 시트에 씁니다.** 실제 시트에서 바로 돌리지 않으려면 3·4번(사본·`SPREADSHEET_ID`·`DRY_RUN`)을 먼저 하고 push 합니다.
 
 **B. 사본에서 미리보기 (DRY_RUN)**
 - [ ] 3. 실제 시트의 사본을 만들고, 사본 `처리로그` 의 2행부터 지웁니다(안 지우면 지난 메일이 "처리됨" 으로 건너뜀).
-- [ ] 4. 스크립트 속성(⚙️ 프로젝트 설정 → 스크립트 속성)에 `SPREADSHEET_ID` = 사본 ID, `DRY_RUN` = `true` 를 넣습니다. 지난 착수 메일까지 보려면 `INIT_SEARCH_QUERY` = `subject:"GS 시험 인증 시작 안내" newer_than:60d`.
+- [x] 4. (2026-11-07 사용자 설정) 스크립트 속성(⚙️ 프로젝트 설정 → 스크립트 속성)에 `SPREADSHEET_ID` = 사본 ID, `DRY_RUN` = `true` 를 넣습니다. 지난 착수 메일까지 보려면 `INIT_SEARCH_QUERY` = `subject:"GS 시험 인증 시작 안내" newer_than:60d`.
 - [ ] 5. 편집기에서 `runInitiationCheck`, `runProgressCheck` 를 실행하고 확인합니다.
   - 실행 로그에 `Gemini 호출 불가` 가 없는지 → 있으면 그 줄을 알려 주세요 (D3)
   - `시뮬레이션` 탭: 착수 메일이 마지막 데이터 바로 아래 행으로 기록되는지, 마스터에 들어갈 값이 맞는지
