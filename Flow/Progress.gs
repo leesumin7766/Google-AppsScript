@@ -69,9 +69,11 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, todoSheet, colM
       if (!resolved.testNumber) {
         const candidates = (resolved.candidates || []).length ? ` (후보: ${resolved.candidates.join(', ')})` : '';
         const reason = `시험번호 없음: ${resolved.reason}${candidates}`;
-        writeQueue('', [{ colName: '시험번호', current: '', value: (resolved.candidates || []).join(', '), reason: reason }],
-                   { 제목: subject, 발신: sender, 후보: resolved.candidates || [] });
-        writer.log(logSheet, msgId, date, `확인 큐로 전송: ${reason}`, '', { status: LOG_STATUS.QUEUED, row: logRow });
+        // 2026-11-09: 시험번호 행은 확인 큐에서 적용할 수 없어(마스터의 어느 칸을 바꾸는 결정이 아님) 할 일로 알립니다
+        const todo = { 내용: `시험번호 확인: '${subject}' 메일 — ${reason}`, 기한: null };
+        buildTodoRows([todo], '', msgId, nowText(), todoKeys).forEach(row =>
+          writer.appendRow(todoSheet, row, { msgId: msgId, testNumber: '', reason: '할 일 추가: 시험번호 확인' }));
+        writer.log(logSheet, msgId, date, `할 일로 전송: ${reason}`, '', { status: LOG_STATUS.QUEUED, row: logRow });
         continue;
       }
 
@@ -160,14 +162,23 @@ function processGSLabelEmails(masterSheet, logSheet, queueSheet, todoSheet, colM
                     `[${i.colName}] ${i.value}`);
       });
 
-      // 확신도가 낮으면 아무것도 반영하지 않고 전부 확인 큐로 보냅니다 (원칙 1)
+      // 확신도가 낮으면 마스터에는 아무것도 반영하지 않고, 바꿀 값은 확인 큐로 보냅니다 (원칙 1)
+      // 2026-11-09: 할 일은 마스터 변경이 아니므로 확신도와 관계없이 넣습니다. 바꿀 값이 없으면 확인 큐 행을 만들지 않고
+      //             (결정할 것이 없음) 할 일이 하나도 없을 때 '메일 확인' 할 일을 넣어 사람이 알게 합니다
       if (llmResult.확신도 === "낮음") {
         const why = `확신도 낮음: ${llmResult.불확실한이유}`;
         const items = check.updates.map(u => ({ colName: u.colName, current: currentRowData[u.colName], value: u.value, reason: why }))
           .concat(check.queued.map(q => Object.assign({}, q, { reason: `${why} / ${q.reason}` })));
-        writeQueue(testNumber, items, llmResult, why);
-        writer.log(logSheet, msgId, date, `LLM: 확신도 낮음 → 확인 큐 (${testNumber})`, testNumber,
-                   { status: LOG_STATUS.QUEUED, attempts: attempts, row: logRow });
+        if (items.length) writeQueue(testNumber, items, llmResult, why);
+        let todoRows = buildTodoRows(llmResult.할일, testNumber, msgId, nowText(), todoKeys);
+        if (!items.length && !todoRows.length) {
+          const about = llmResult.요약 ? String(llmResult.요약).trim() : `'${subject}' 메일`;
+          todoRows = buildTodoRows([{ 내용: `메일 확인: ${about} (${why})`, 기한: null }], testNumber, msgId, nowText(), todoKeys);
+        }
+        todoRows.forEach(row => writer.appendRow(todoSheet, row, { msgId: msgId, testNumber: testNumber, reason: '할 일 추가' }));
+        const done = items.length ? `확인 큐 ${items.length}건` : '바꿀 값 없음';
+        writer.log(logSheet, msgId, date, `LLM: 확신도 낮음 → ${done}, 할 일 ${todoRows.length}건 (${testNumber})`, testNumber,
+                   { status: items.length ? LOG_STATUS.QUEUED : LOG_STATUS.DONE, attempts: attempts, row: logRow });
         continue;
       }
 

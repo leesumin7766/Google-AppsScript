@@ -597,7 +597,7 @@ test('[A3] 내가 보낸 메일은 받는 사람 도메인으로 맞춤', () => 
   assert.strictEqual(master.get(3, F.col('패치')), '2026-11-20');
 });
 
-test('[A3] 후보가 없거나(공용 메일) 여러 개면 확인 큐 + 확인대기, 다음 주기에 다시 처리하지 않음', () => {
+test('[A3] 후보가 없거나(공용 메일) 여러 개면 할 일(시험번호 확인) + 확인대기, 확인 큐에는 넣지 않음, 다시 처리하지 않음', () => {
   const ss = F.makeSpreadsheet(F.COPY_ID, F.makeMaster({ rows: [
     progressRow({ 담당자: 'a@ganada.example' }), { 시험번호: 'TTA-26-00002', 상태: '진행', 담당자: 'b@ganada.example' },
     { 시험번호: 'TTA-25-00003', 상태: '종료', 담당자: 'c@ganada.example' },
@@ -607,13 +607,17 @@ test('[A3] 후보가 없거나(공용 메일) 여러 개면 확인 큐 + 확인�
     fakeThread('th2', [noNumber({ id: 'm-multi', from: 'd@ganada.example' })]),
   ];
   progressRun(ss, { gsThreads: threads, llmResponse: llm() });
-  const q = queueRows(ss.getSheetByName('확인 큐'));
-  assert.strictEqual(q.length, 2);
-  assert.ok(q[0].열 === '시험번호' && q[0].사유.includes('후보 없음') && q[0].시험번호 === '');
-  assert.ok(q[1].사유.includes('여러 개') && q[1].제안값 === 'TTA-26-00001, TTA-26-00002');
+  // 2026-11-09: 시험번호 행은 확인 큐에서 적용할 수 없으므로 할 일로 알린다
+  const queue = ss.getSheetByName('확인 큐');
+  assert.strictEqual(queue ? queueRows(queue).length : 0, 0);
+  const t = todoRows(ss.getSheetByName('할 일'));
+  assert.strictEqual(t.length, 2);
+  assert.ok(t[0].시험번호 === '' && t[0].내용.startsWith('시험번호 확인:') && t[0].내용.includes('후보 없음'));
+  assert.ok(t[1].내용.includes('여러 개') && t[1].내용.includes('TTA-26-00001, TTA-26-00002'));
+  assert.ok(t.every(r => r.상태 === '신규'));
   assert.deepStrictEqual(logRows(ss.getSheetByName('처리로그')).map(r => r.상태), ['확인대기', '확인대기']);
   const f = progressRun(ss, { gsThreads: threads, llmResponse: llm() });
-  assert.strictEqual(queueRows(ss.getSheetByName('확인 큐')).length, 2, '두 번째 실행에서 다시 올리지 않음');
+  assert.strictEqual(todoRows(ss.getSheetByName('할 일')).length, 2, '두 번째 실행에서 다시 올리지 않음');
   assert.strictEqual(f.fetches.length, 0);
 });
 
@@ -721,16 +725,34 @@ test('[B1] 같은 시험번호·내용·기한의 할 일은 다시 넣지 않�
   assert.deepStrictEqual(todoRows(ss.getSheetByName('할 일')).map(r => r.내용), ['패치본 수령 후 재시험', '결함리포트 회신 확인', '새 할 일']);
 });
 
-test('[B1] 확신도 낮음이면 할 일도 넣지 않음 / DRY_RUN 은 할 일 탭을 만들지 않고 기록만', () => {
+test('[B1] 확신도가 낮아도 할 일은 넣음(마스터 변경이 아님) / DRY_RUN 은 할 일 탭을 만들지 않고 기록만', () => {
   const low = setup({ master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
                       llmResponse: llm({ 확신도: '낮음', 할일: todos }) });
   low.flow.runProgressCheck();
-  assert.strictEqual(todoRows(low.ss.getSheetByName('할 일')).length, 0);
+  assert.strictEqual(todoRows(low.ss.getSheetByName('할 일')).length, 2);
   const dry = setup({ dry: true, master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
                       llmResponse: llm({ 할일: todos }) });
   dry.flow.runProgressCheck();
   assert.strictEqual(dry.ss.getSheetByName('할 일'), null);
   assert.strictEqual(simObjs(dry.ss).filter(r => r.탭 === '할 일').length, 2);
+});
+
+test('[B1] 확신도 낮음 + 바꿀 값 없음 → 확인 큐 행을 만들지 않고 메일 확인 할 일, 처리로그는 완료', () => {
+  const { ss, flow } = setup({ master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+    llmResponse: llm({ 확신도: '낮음', 불확실한이유: '날짜가 없음', 열갱신: [], 할일: [], 요약: '방문 일정 조율 안내' }) });
+  flow.runProgressCheck();
+  const queue = ss.getSheetByName('확인 큐');
+  assert.strictEqual(queue ? queueRows(queue).length : 0, 0, '결정할 것이 없으면 확인 큐에 넣지 않음');
+  const t = todoRows(ss.getSheetByName('할 일'));
+  assert.strictEqual(t.length, 1);
+  assert.strictEqual(t[0].내용, '메일 확인: 방문 일정 조율 안내 (확신도 낮음: 날짜가 없음)');
+  assert.strictEqual(t[0].시험번호, 'TTA-26-00001');
+  assert.deepStrictEqual(logRows(ss.getSheetByName('처리로그')).map(r => r.상태), ['완료']);
+  // 할 일이 있으면 그 할 일만 넣고 '메일 확인'은 넣지 않음
+  const withTodo = setup({ master: F.makeMaster({ rows: [progressRow()] }), gsThreads: [fakeThread('th1', [F.MAIL.progress1])],
+    llmResponse: llm({ 확신도: '낮음', 불확실한이유: '날짜가 없음', 열갱신: [], 할일: [{ 내용: '방문 가능 일시 회신', 기한: null }] }) });
+  withTodo.flow.runProgressCheck();
+  assert.deepStrictEqual(todoRows(withTodo.ss.getSheetByName('할 일')).map(r => r.내용), ['방문 가능 일시 회신']);
 });
 
 test('[B2] 확인 큐: 머리글·처리 드롭다운, 변경 1건당 1행, 보관함도 열리는 #all 링크', () => {
